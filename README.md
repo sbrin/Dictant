@@ -19,6 +19,7 @@ Free and open-source—there are no paywalls, you only cover your own OpenAI API
 - **ChatGPT post-processing**: Run transcripts through GPT with your custom system prompt.
 - **History & retries**: Browse recordings, re-run failed/pending transcriptions, copy or open files in Finder, and clear history.
 - **Launch at login**: Keep Dictant running in the background after reboot.
+- **Smart Silence Removal**: Automatically trims long pauses and silence from your audio before processing to improve transcription accuracy and reduce API usage.
 - **Notifications**: Get alerts for missing/invalid API keys, permission issues, success, and failures.
 - **Privacy-aware**: API key stays in Keychain, audio files stay local (Application Support), only the transcription request hits OpenAI.
 
@@ -68,7 +69,7 @@ The script renders a gradient background on the fly, applies the app icon to the
 - **Invalid or missing API key**: Add a valid key in `Settings → Processing`; the app surfaces notifications when the key is rejected.
 - **Cannot start recording**: Ensure microphone permission is granted in System Settings → Privacy & Security → Microphone.
 - **Auto-paste disabled**: Enable Accessibility access for Dictant in System Settings → Privacy & Security → Accessibility.
-- **Short recordings discarded**: Clips under a few seconds are dropped automatically - record a little longer.
+- **Short recordings discarded**: Clips under a few seconds (or entirely silent/too quiet) are dropped automatically.
 - **Retries**: Use `Settings → History` to re-run failed or pending transcriptions.
 
 ## Contributing

@@ -165,9 +165,56 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             return
         }
         
+        
         self.isProcessing = true
         transcriptionTask = Task {
-            await processAudioFile(url: url, recordingId: recordingId, startDate: startDate, duration: duration)
+            var processUrl = url
+            var processDuration = duration
+            
+            // Process to remove silence
+            do {
+                #if DEBUG
+                print("SimpleSpeechViewModel: Starting silence removal...")
+                #endif
+                let processedUrl = try await AudioProcessor.shared.processAudio(at: url)
+                processUrl = processedUrl
+                
+                // Recalculate duration
+                if let assetDuration = try? await AVAsset(url: processedUrl).load(.duration).seconds {
+                    processDuration = assetDuration
+                    #if DEBUG
+                    print("SimpleSpeechViewModel: Silence removed. Original: \(duration)s, New: \(assetDuration)s")
+                    #endif
+                }
+            } catch {
+                #if DEBUG
+                print("SimpleSpeechViewModel: Audio processing failed: \(error). Using original file.")
+                #endif
+            }
+            
+            // Final duration check
+            if processDuration < 1.0 {
+                #if DEBUG
+                print("SimpleSpeechViewModel: Final audio duration (%.2fs) is too short. Aborting transcription.", processDuration)
+                #endif
+                self.isProcessing = false
+                self.currentRecordingId = nil
+                self.currentRecordingStartDate = nil
+                try? FileManager.default.removeItem(at: processUrl)
+                
+                // Notify user
+                let content = UNMutableNotificationContent()
+                content.title = "Input too short"
+                content.body = "It was too quiet. Please check your microphone settings and try again."
+                content.sound = .default
+                
+                let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+                try? await UNUserNotificationCenter.current().add(request)
+                
+                return
+            }
+            
+            await processAudioFile(url: processUrl, recordingId: recordingId, startDate: startDate, duration: processDuration)
         }
     }
     
