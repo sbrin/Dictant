@@ -1,0 +1,2 @@
+- Project language: All UI texts, menus, notifications, and code comments should be in English.
+- Do not use Russian for any user-facing strings or internal documentation.
