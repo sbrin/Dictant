@@ -11,6 +11,7 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     
     private var statusItemManager: StatusItemManager?
+    private var mouseIndicatorManager: MouseIndicatorManager?
     
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -20,6 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         alignPasteSettingWithAccessibilityPermission()
         // Initialize StatusItemManager
         statusItemManager = StatusItemManager.shared
+        mouseIndicatorManager = MouseIndicatorManager.shared
         
         // Start Global Keyboard Monitoring
         KeyboardManager.shared.startMonitoring()
