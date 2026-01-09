@@ -111,6 +111,19 @@ class AudioProcessor {
         
         if success {
             await writer.finishWriting()
+            if writer.status != .completed {
+                try? FileManager.default.removeItem(at: outputURL)
+                throw AudioProcessorError.writerFailed(writer.error?.localizedDescription ?? "Unknown error")
+            }
+            guard FileManager.default.fileExists(atPath: outputURL.path) else {
+                throw AudioProcessorError.processingFailed
+            }
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+               let size = attributes[.size] as? NSNumber,
+               size.int64Value <= 0 {
+                try? FileManager.default.removeItem(at: outputURL)
+                throw AudioProcessorError.processingFailed
+            }
             // Clean up original file if needed, but for now we return the new one
             // The caller can decide to delete the old one.
             return outputURL
@@ -138,6 +151,7 @@ class AudioProcessor {
             var silenceStartTime: CMTime = .invalid
             var lastWrittenTime: CMTime = .zero
             var outputTimeOffset: CMTime = .invalid
+            var didFinish = false
             
             // Pending silent buffers that we might write if the silence isn't long enough
             var pendingBuffers: [(CMSampleBuffer, CMTime)] = [] // (buffer, originalPTS)
@@ -145,13 +159,22 @@ class AudioProcessor {
             // Output buffering to handle backpressure
             var outgoingBuffers: [CMSampleBuffer] = []
             
+            func finish(_ success: Bool) {
+                guard !didFinish else { return }
+                didFinish = true
+                writerInput.markAsFinished()
+                continuation.resume(returning: success)
+            }
+            
             /// Writes as many buffers from `outgoingBuffers` as possible.
             /// Returns `true` if we can continue generating data (buffer isn't full), `false` if we should stop and wait.
             func flushOutgoing() -> Bool {
                 while !outgoingBuffers.isEmpty {
                     if writerInput.isReadyForMoreMediaData {
                         let buffer = outgoingBuffers.removeFirst()
-                        writerInput.append(buffer)
+                        if !writerInput.append(buffer) {
+                            return false
+                        }
                     } else {
                         // Not ready, stop writing and wait for next callback
                         return false
@@ -161,13 +184,27 @@ class AudioProcessor {
             }
             
             writerInput.requestMediaDataWhenReady(on: queue) {
+                if didFinish {
+                    return
+                }
+                if Task.isCancelled || reader.status == .failed || reader.status == .cancelled || writer.status == .failed || writer.status == .cancelled {
+                    finish(false)
+                    return
+                }
                 // 1. Flush any pending data from previous runs
                 if !flushOutgoing() {
+                    if writer.status == .failed || writer.status == .cancelled {
+                        finish(false)
+                    }
                     return // Still not ready, wait for next callback
                 }
                 
                 // 2. Generate new data as long as input is ready
                 while writerInput.isReadyForMoreMediaData {
+                    if Task.isCancelled || reader.status == .failed || reader.status == .cancelled || writer.status == .failed || writer.status == .cancelled {
+                        finish(false)
+                        return
+                    }
                     guard let buffer = output.copyNextSampleBuffer() else {
                         // EOF - Handle potential pending silence
                         if isSilentSequence {
@@ -210,8 +247,7 @@ class AudioProcessor {
                         // flush remaining final buffers
                         _ = flushOutgoing()
                         
-                        writerInput.markAsFinished()
-                        continuation.resume(returning: reader.status == .completed)
+                        finish(reader.status == .completed && writer.status != .failed && writer.status != .cancelled)
                         return
                     }
                     
@@ -299,6 +335,9 @@ class AudioProcessor {
                     // Attempt to flush after each processing step
                     // If we can't flush everything, we break the loop (writerInput.isReadyForMoreMediaData will be checked next iteration or inside flushOutgoing)
                     if !flushOutgoing() {
+                        if writer.status == .failed || writer.status == .cancelled {
+                            finish(false)
+                        }
                         break 
                     }
                 }
