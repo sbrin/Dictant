@@ -1,8 +1,8 @@
-# Dictant
+# Dictant - native Mac OS wrapper for OpenAI Whisper
 
 Dictant is a tiny (<1 MB) macOS menu bar push-to-talk app that turns your voice into polished text with OpenAI Whisper and optional ChatGPT cleanup.
 
-Free and open-source—there are no paywalls, you only cover your own OpenAI API usage.
+Free and open-source — there are no paywalls, you only cover your own OpenAI API usage.
 
 ## Why Dictant
 - Built for speed: hold the right Command key or tap the menu bar icon to start/stop recording in a second.
@@ -10,17 +10,16 @@ Free and open-source—there are no paywalls, you only cover your own OpenAI API
 - Reliable status cues: menu bar icon blinks red while recording and green while processing.
 - Smart post-processing: optional ChatGPT pass with your own system prompt for better output.
 - Persistent history: recordings and transcripts live locally so you can retry failed jobs.
-- macOS-first: Swift, native notifications, Keychain storage, launch-at-login toggle, and accessibility-safe prompts.
+- macOS-first: SwiftUI, native notifications, Keychain storage
 
 ## Core Features
-- **Push-to-talk**: Hold the right Command key for 1 second to start recording; release to stop (configurable).
+- **Push-to-talk**: Hold the right ⌘ (Command key) for 1 second to start recording; release to stop
 - **Menu bar workflow**: Left-click to toggle recording, right-click for quick actions (start/stop, settings, history, quit).
 - **Clipboard & paste**: Copy transcripts to the clipboard; optionally auto-paste into the active text field (requires Accessibility).
 - **ChatGPT post-processing**: Run transcripts through GPT with your custom system prompt.
 - **History & retries**: Browse recordings, re-run failed/pending transcriptions, copy or open files in Finder, and clear history.
 - **Launch at login**: Keep Dictant running in the background after reboot.
 - **Smart Silence Removal**: Automatically trims long pauses and silence from your audio before processing to improve transcription accuracy and reduce API usage.
-- **Notifications**: Get alerts for missing/invalid API keys, permission issues, success, and failures.
 - **Privacy-aware**: API key stays in Keychain, audio files stay local (Application Support), only the transcription request hits OpenAI.
 
 ## Requirements
@@ -42,17 +41,15 @@ Use the bundled helper script plus `create-dmg` for a polished installer.
 3. Package it: `./packaging/create_dmg.sh` (override paths with `./packaging/create_dmg.sh /path/to/Dictant.app CustomName.dmg`).
 4. For a one-shot build + DMG from the terminal: `./packaging/build_and_dmg.sh` (override with env vars like `DERIVED_DATA=build/DerivedData DMG_NAME=Custom.dmg ARCHS="arm64 x86_64"`).
 
-The script renders a gradient background on the fly, applies the app icon to the volume, lays out the app and Applications link, and writes the DMG to `build/Dictant.dmg`.
-
 ## Quick Start
 1. Launch the app; it lives in the menu bar.
 2. Open `Settings → Processing`, paste your OpenAI API key, and save it (stored in Keychain).
 3. Optional tweaks in `Settings → General`:
    - Run at system startup
    - Copy to clipboard / paste into the active input
-   - Enable push-to-talk (hold right Command)
+   - Enable push-to-talk
 4. Press and hold the right Command key for 1s to start talking, then release to stop. Or click the menu bar icon to toggle.
-5. Check notifications or `Settings → History` for transcripts; copy, re-run, or open recordings from there.
+5. Check `Settings → History` for transcripts; copy, re-run, or open recordings from there.
 
 ## Usage Notes
 - **Menu bar icon states**: solid icon (idle), blinking red (recording), blinking green (processing).

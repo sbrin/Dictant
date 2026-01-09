@@ -1,14 +1,15 @@
 //
-//  CredentialsView.swift
+//  ProcessingView.swift
 //  Dictant
 //
 
 import SwiftUI
 import AppKit
 
-struct CredentialsView: View {
+struct ProcessingView: View {
     @StateObject private var settingsManager = SettingsManager.shared
     @State private var tempAPIKey = ""
+    private let apiKeyHelpURL = URL(string: "https://platform.openai.com/account/api-keys")!
     
     private var hasUnsavedChanges: Bool { tempAPIKey != settingsManager.openAIAPIKey }
     
@@ -40,6 +41,16 @@ struct CredentialsView: View {
                 Text("Your API key is stored securely in the macOS Keychain.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                
+                if settingsManager.openAIAPIKey.isEmpty || !settingsManager.isAPIKeyValid {
+                    HStack(spacing: 4) {
+                        Text("No valid API key found. Create one at")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Link("https://platform.openai.com/account/api-keys", destination: apiKeyHelpURL)
+                            .font(.caption)
+                    }
+                }
                 
                 if hasUnsavedChanges && !tempAPIKey.isEmpty {
                     HStack {

@@ -24,12 +24,6 @@ struct GeneralSettingsView: View {
                     isOn: $settingsManager.launchAtLogin
                 )
                 
-                Divider()
-                
-                SettingToggleRow(
-                    title: "Copy transcribed text to clipboard",
-                    isOn: $settingsManager.copyTranscribedTextToClipboard
-                )
                 
                 Divider()
                 
@@ -38,6 +32,13 @@ struct GeneralSettingsView: View {
                     isOn: $settingsManager.holdRightCommandForPTT
                 )
                 
+                Divider()
+                
+                SettingToggleRow(
+                    title: "Copy transcribed text to clipboard",
+                    isOn: $settingsManager.copyTranscribedTextToClipboard
+                )
+
                 Divider()
                 
                 SettingToggleRow(

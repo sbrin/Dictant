@@ -33,7 +33,7 @@ struct SettingsView: View {
                     GeneralSettingsView()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case "Processing":
-                    CredentialsView()
+                    ProcessingView()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case "History":
                     RecordingsView()
