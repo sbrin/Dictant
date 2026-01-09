@@ -21,6 +21,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
     @Published var recordingDuration = "00:00"
     @Published var error: String?
     @Published var recordings: [Recording] = []
+    @Published var processingRecordingIds: Set<UUID> = []
     
     private var audioRecorder: AVAudioRecorder?
     private let simpleSpeechService = SimpleSpeechService.shared
@@ -256,6 +257,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
     func transcribeExistingRecording(_ recording: Recording) async {
         guard !isProcessing else { return }
         
+        processingRecordingIds.insert(recording.id)
         self.isProcessing = true
         transcriptionTask = Task {
             await processAudioFile(
@@ -281,6 +283,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         defer {
             self.isProcessing = false
             self.transcriptionTask = nil
+            processingRecordingIds.remove(recordingId)
             if !isExisting {
                 self.currentRecordingId = nil
                 self.currentRecordingStartDate = nil
@@ -406,6 +409,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         transcriptionTask?.cancel()
         transcriptionTask = nil
         isProcessing = false
+        processingRecordingIds.removeAll()
         currentRecordingId = nil
         currentRecordingStartDate = nil
     }

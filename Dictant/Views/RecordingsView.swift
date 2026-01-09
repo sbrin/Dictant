@@ -81,6 +81,10 @@ struct RecordingRow: View {
     let onToggle: () -> Void
     @StateObject private var speechViewModel = SimpleSpeechViewModel.shared
     
+    private var isTranscribing: Bool {
+        speechViewModel.processingRecordingIds.contains(recording.id)
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -112,8 +116,9 @@ struct RecordingRow: View {
                         Image(systemName: "waveform.badge.mic")
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
-                    .help("Transcribe recording")
+                    .foregroundColor(isTranscribing ? .secondary : .accentColor)
+                    .disabled(isTranscribing)
+                    .help(isTranscribing ? "Transcription in progress" : "Transcribe recording")
                 }
                 
                 Button {
@@ -146,6 +151,10 @@ struct RecordingRow: View {
             }
             .contentShape(Rectangle())
             .onHover { hovering in
+                if isTranscribing {
+                    NSCursor.arrow.set()
+                    return
+                }
                 if hovering {
                     NSCursor.pointingHand.set()
                 } else {
