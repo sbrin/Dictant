@@ -41,6 +41,11 @@ Use the bundled helper script plus `create-dmg` for a polished installer.
 3. Package it: `./packaging/create_dmg.sh` (override paths with `./packaging/create_dmg.sh /path/to/Dictant.app CustomName.dmg`).
 4. For a one-shot build + DMG from the terminal: `./packaging/build_and_dmg.sh` (override with env vars like `DERIVED_DATA=build/DerivedData DMG_NAME=Custom.dmg ARCHS="arm64 x86_64"`).
 
+## Build a PKG
+Use the bundled helper scripts to create a standard macOS installer package.
+
+Build and package in one shot: `./packaging/build_and_pkg.sh`
+
 ## Quick Start
 1. Launch the app; it lives in the menu bar.
 2. Open `Settings → Processing`, paste your OpenAI API key, and save it (stored in Keychain).
