@@ -1,2 +1,44 @@
+# OS X
 .DS_Store
-build
+
+# Xcode
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+project.xcworkspace/
+!default.xcworkspace
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.swp
+*.lock
+*.ipa
+*.xcscheme
+*.xctest
+
+# Xcode Workspace Shared Data
+# (Keep shared data, ignore user-specific data)
+**/xcuserdata/
+**/xcshareddata/WorkspaceSettings.xcsettings
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/package.xcworkspace/
+.swiftpm/xcode/xcuserdata/
+
+# Package.resolved should be committed in most cases for apps
+# Package.resolved
+
+# App Store Connect / Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Bundle
+vendor/bundle/
+.bundle/

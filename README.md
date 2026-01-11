@@ -39,10 +39,29 @@ Free and open-source — there are no paywalls, you only cover your own OpenAI A
 - Internet access for transcription and optional ChatGPT post-processing
 
 ## Install from Source
-1. Clone this repo and open `Dictant.xcodeproj` in Xcode.
-2. Select your signing team if needed.
-3. Build and run the `Dictant` target.
-4. Grant microphone access when prompted.
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/sbrin/Dictant.git
+   cd Dictant
+   ```
+2. **Open the project**:
+   Open `Dictant.xcodeproj` in Xcode.
+3. **Configure Building**:
+   - Select the **Dictant** scheme from the target selector at the top.
+   - If prompted about signing, select your personal Development Team in the "Signing & Capabilities" tab of the project settings.
+4. **Build and Run**:
+   Press `⌘R` or click the Play button to build and run the app.
+
+## Building and Packaging
+If you want to build and package the app for distribution, use the scripts in the `packaging/` directory.
+
+### Prerequisites for Packaging
+No special tools are required for `.pkg` creation as it uses native `pkgbuild`.
+
+### Build Commands
+- **Build PKG**: `./packaging/build_and_pkg.sh`
+
+The artifacts will be placed in the `build/` directory.
 
 ## Build a PKG
 Use the bundled helper scripts to create a standard macOS installer package.

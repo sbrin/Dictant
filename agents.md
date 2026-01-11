@@ -1,2 +1,5 @@
-- Project language: All UI texts, menus, notifications, and code comments should be in English.
-- Do not use Russian for any user-facing strings or internal documentation.
+ALWAYS FOLLOW Swift 6 SPEC AND RECOMMENDATIONS
+
+NEVER RUN any mac os .app 
+
+PROJECT LANGUAGE: All UI texts, menus, notifications, and code comments must be in English.
