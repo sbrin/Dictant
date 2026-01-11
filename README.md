@@ -1,4 +1,4 @@
-# Dictant - native Mac OS wrapper for OpenAI Whisper
+# Dictant.app - Minimalistic dictation app for Mac (OpenAI Whisper wrapper)
 
 Dictant is a tiny (<1 MB) macOS menu bar push-to-talk app that turns your voice into polished text with OpenAI Whisper and optional ChatGPT cleanup.
 
