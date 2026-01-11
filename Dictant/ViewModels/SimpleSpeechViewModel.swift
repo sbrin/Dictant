@@ -7,6 +7,7 @@ import SwiftUI
 import Combine
 import AVFoundation
 import AppKit
+import UniformTypeIdentifiers
 import CoreGraphics
 import ApplicationServices
 @preconcurrency import UserNotifications
@@ -83,11 +84,11 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         let recordingId = UUID()
         let startDate = Date()
         
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        let timestamp = dateFormatter.string(from: startDate).replacingOccurrences(of: ":", with: "-")
-        let fileName = "\(recordingId.uuidString)_\(timestamp).m4a"
-        let fileURL = SimpleSpeechViewModel.recordingsDirectory.appendingPathComponent(fileName)
+        let fileURL = makeRecordingFileURL(
+            recordingId: recordingId,
+            startDate: startDate,
+            fileExtension: "m4a"
+        )
         
         self.audioFileURL = fileURL
         self.currentRecordingId = recordingId
@@ -183,75 +184,239 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             return
         }
         
+        runTranscriptionFlow(
+            sourceURL: recordingURL,
+            recordingURL: recordingURL,
+            recordingId: recordingId,
+            startDate: startDate,
+            originalDuration: recordedDuration,
+            context: "recording",
+            tooShortMessage: "It was too quiet. Please check your microphone settings and try again.",
+            cleanupURLs: [recordingURL]
+        ) {
+            self.isProcessing = false
+            self.currentRecordingId = nil
+            self.currentRecordingStartDate = nil
+            self.transcriptionTask = nil
+        }
+    }
+
+    func loadAudioFile() async {
+        guard !isRecording && !isProcessing else { return }
+        if !settingsManager.isAPIKeyValid {
+            settingsManager.selectedTab = "Processing"
+            StatusItemManager.shared.showSettingsWindow()
+
+            let content = UNMutableNotificationContent()
+            content.title = "OpenAI API Key Required"
+            content.body = "Please set up your OpenAI API key in the settings to start transcribing."
+            content.sound = .default
+
+            let request = UNNotificationRequest(identifier: "APIKeyRequired", content: content, trigger: nil)
+            try? await UNUserNotificationCenter.current().add(request)
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Load Audio File"
+        panel.prompt = "Load"
+        panel.message = "Choose an audio file to transcribe."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.audio]
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+
+        guard isAudioFileUsable(selectedURL) else {
+            self.error = "Selected audio file is missing or empty."
+
+            let content = UNMutableNotificationContent()
+            content.title = "Invalid Audio File"
+            content.body = "The selected audio file could not be opened. Please choose another file."
+            content.sound = .default
+
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            try? await UNUserNotificationCenter.current().add(request)
+            return
+        }
+
+        self.error = nil
+        self.transcriptionText = ""
+        let recordingId = UUID()
+        let startDate = Date()
+
+        let fileExtension = selectedURL.pathExtension.isEmpty ? "m4a" : selectedURL.pathExtension
+        let recordingURL = makeRecordingFileURL(
+            recordingId: recordingId,
+            startDate: startDate,
+            fileExtension: fileExtension
+        )
+
+        var originalDuration: TimeInterval = 0
+        var didCopyOriginal = false
+
+        if let assetDuration = try? await AVAsset(url: selectedURL).load(.duration).seconds {
+            originalDuration = assetDuration
+        }
+        do {
+            try FileManager.default.copyItem(at: selectedURL, to: recordingURL)
+            didCopyOriginal = true
+        } catch {
+            #if DEBUG
+            print("SimpleSpeechViewModel: Failed to copy original file into history: \(error)")
+            #endif
+        }
+
+        var cleanupURLs: [URL] = []
+        if didCopyOriginal {
+            cleanupURLs.append(recordingURL)
+        }
+
+        runTranscriptionFlow(
+            sourceURL: selectedURL,
+            recordingURL: recordingURL,
+            recordingId: recordingId,
+            startDate: startDate,
+            originalDuration: originalDuration,
+            context: "loaded file",
+            tooShortMessage: "It was too quiet. Please check your audio and try again.",
+            cleanupURLs: cleanupURLs
+        ) {
+            self.isProcessing = false
+            self.transcriptionTask = nil
+        }
+    }
+
+    private func runTranscriptionFlow(
+        sourceURL: URL,
+        recordingURL: URL,
+        recordingId: UUID,
+        startDate: Date,
+        originalDuration: TimeInterval,
+        context: String,
+        tooShortMessage: String,
+        cleanupURLs: [URL],
+        onEarlyExit: @escaping () -> Void
+    ) {
         self.isProcessing = true
         transcriptionTask = Task {
-            var transcriptionURL = recordingURL
-            var transcriptionDuration = recordedDuration
-            
-            // Process to remove silence
-            do {
-                #if DEBUG
-                print("SimpleSpeechViewModel: Starting silence removal...")
-                #endif
-                let processedUrl = try await AudioProcessor.shared.processAudio(at: recordingURL)
-                if isAudioFileUsable(processedUrl) {
-                    transcriptionURL = processedUrl
-                } else {
-                    if processedUrl != recordingURL, isTemporaryFile(processedUrl) {
-                        try? FileManager.default.removeItem(at: processedUrl)
-                    }
-                    #if DEBUG
-                    print("SimpleSpeechViewModel: Processed audio file is missing or empty. Using original file.")
-                    #endif
-                }
-                
-                // Recalculate duration
-                if let assetDuration = try? await AVAsset(url: transcriptionURL).load(.duration).seconds {
-                    transcriptionDuration = assetDuration
-                    #if DEBUG
-                    print("SimpleSpeechViewModel: Silence removed. Original: \(recordedDuration)s, New: \(assetDuration)s")
-                    #endif
-                }
-            } catch {
-                #if DEBUG
-                print("SimpleSpeechViewModel: Audio processing failed: \(error). Using original file.")
-                #endif
+            let prepared = await prepareAudioForTranscription(
+                sourceURL: sourceURL,
+                originalDuration: originalDuration,
+                context: context
+            )
+            let transcriptionURL = prepared.transcriptionURL
+            let transcriptionDuration = prepared.transcriptionDuration
+
+            var finalCleanupURLs = cleanupURLs
+            if transcriptionURL != sourceURL, isTemporaryFile(transcriptionURL) {
+                finalCleanupURLs.append(transcriptionURL)
             }
-            
-            // Final duration check
-            if transcriptionDuration < 1.0 {
-                #if DEBUG
-                print("SimpleSpeechViewModel: Final audio duration (%.2fs) is too short. Aborting transcription.", transcriptionDuration)
-                #endif
-                self.isProcessing = false
-                self.currentRecordingId = nil
-                self.currentRecordingStartDate = nil
-                self.transcriptionTask = nil
-                try? FileManager.default.removeItem(at: recordingURL)
-                if transcriptionURL != recordingURL, isTemporaryFile(transcriptionURL) {
-                    try? FileManager.default.removeItem(at: transcriptionURL)
-                }
-                
-                // Notify user
-                let content = UNMutableNotificationContent()
-                content.title = "Input too short"
-                content.body = "It was too quiet. Please check your microphone settings and try again."
-                content.sound = .default
-                
-                let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-                try? await UNUserNotificationCenter.current().add(request)
-                
-                return
+
+            let didAbort = await handleTooShortTranscription(
+                duration: transcriptionDuration,
+                notificationBody: tooShortMessage,
+                cleanupURLs: finalCleanupURLs
+            ) {
+                onEarlyExit()
             }
-            
+            if didAbort { return }
+
             await processAudioFile(
                 recordingURL: recordingURL,
                 transcriptionURL: transcriptionURL,
                 recordingId: recordingId,
                 startDate: startDate,
-                duration: recordedDuration
+                duration: originalDuration,
+                processedDuration: transcriptionDuration
             )
         }
+    }
+
+    private func prepareAudioForTranscription(
+        sourceURL: URL,
+        originalDuration: TimeInterval,
+        context: String
+    ) async -> (transcriptionURL: URL, transcriptionDuration: TimeInterval) {
+        var transcriptionURL = sourceURL
+        var transcriptionDuration = originalDuration
+
+        do {
+            #if DEBUG
+            print("SimpleSpeechViewModel: Starting silence removal for \(context)...")
+            #endif
+            let processedUrl = try await AudioProcessor.shared.processAudio(at: sourceURL)
+            if isAudioFileUsable(processedUrl) {
+                transcriptionURL = processedUrl
+            } else {
+                if processedUrl != sourceURL, isTemporaryFile(processedUrl) {
+                    try? FileManager.default.removeItem(at: processedUrl)
+                }
+                #if DEBUG
+                print("SimpleSpeechViewModel: Processed audio file is missing or empty. Using original file.")
+                #endif
+            }
+
+            if let assetDuration = try? await AVAsset(url: transcriptionURL).load(.duration).seconds,
+               assetDuration.isFinite {
+                transcriptionDuration = assetDuration
+                #if DEBUG
+                print("SimpleSpeechViewModel: Silence removed. Original: \(originalDuration)s, New: \(assetDuration)s")
+                #endif
+            }
+        } catch {
+            #if DEBUG
+            print("SimpleSpeechViewModel: Audio processing failed: \(error). Using original file.")
+            #endif
+        }
+
+        return (transcriptionURL, transcriptionDuration)
+    }
+
+    private func isTooShortTranscriptionDuration(_ duration: TimeInterval) -> Bool {
+        duration.isFinite && duration > 0 && duration < 1.0
+    }
+
+    private func handleTooShortTranscription(
+        duration: TimeInterval,
+        notificationBody: String,
+        cleanupURLs: [URL],
+        onEarlyExit: () -> Void
+    ) async -> Bool {
+        guard isTooShortTranscriptionDuration(duration) else { return false }
+
+        #if DEBUG
+        print(String(format: "SimpleSpeechViewModel: Final audio duration (%.2fs) is too short. Aborting transcription.", duration))
+        #endif
+
+        onEarlyExit()
+
+        for url in Set(cleanupURLs) {
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Input too short"
+        content.body = notificationBody
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+
+        return true
+    }
+
+    private func makeRecordingFileURL(
+        recordingId: UUID,
+        startDate: Date,
+        fileExtension: String
+    ) -> URL {
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        let timestamp = dateFormatter.string(from: startDate).replacingOccurrences(of: ":", with: "-")
+        let fileName = "\(recordingId.uuidString)_\(timestamp).\(fileExtension)"
+        return SimpleSpeechViewModel.recordingsDirectory.appendingPathComponent(fileName)
     }
     
     func transcribeExistingRecording(_ recording: Recording) async {
@@ -266,6 +431,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
                 recordingId: recording.id,
                 startDate: recording.startDate,
                 duration: recording.duration ?? 0,
+                processedDuration: recording.processedDuration,
                 isExisting: true
             )
         }
@@ -277,9 +443,10 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         recordingId: UUID,
         startDate: Date,
         duration: TimeInterval,
+        processedDuration: TimeInterval?,
         isExisting: Bool = false
     ) async {
-        var cleanupURL: URL?
+        var cleanupURLs: [URL] = []
         defer {
             self.isProcessing = false
             self.transcriptionTask = nil
@@ -288,7 +455,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
                 self.currentRecordingId = nil
                 self.currentRecordingStartDate = nil
             }
-            if let cleanupURL = cleanupURL {
+            for cleanupURL in cleanupURLs {
                 try? FileManager.default.removeItem(at: cleanupURL)
             }
         }
@@ -306,10 +473,31 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             return
         }
         
-        let recordingURLToSave = ensureRecordingFile(for: recordingURL, fallbackURL: transcriptionURLToUse)
-        if transcriptionURLToUse != recordingURL, isTemporaryFile(transcriptionURLToUse) {
-            cleanupURL = transcriptionURLToUse
+        let recordingURLToSave = ensureRecordingFile(
+            for: recordingURL,
+            processedURL: transcriptionURLToUse,
+            preferProcessed: !isExisting
+        )
+        var transcriptionParts = [transcriptionURLToUse]
+        do {
+            transcriptionParts = try await AudioProcessor.shared.splitAudioIfNeeded(
+                at: transcriptionURLToUse,
+                maxSizeBytes: SimpleSpeechService.maxAudioPayloadBytes
+            )
+        } catch {
+            #if DEBUG
+            print("SimpleSpeechViewModel: Audio splitting failed: \(error). Using original file.")
+            #endif
         }
+
+        var cleanupSet = Set<URL>()
+        if transcriptionURLToUse != recordingURL, isTemporaryFile(transcriptionURLToUse) {
+            cleanupSet.insert(transcriptionURLToUse)
+        }
+        for partURL in transcriptionParts where partURL != recordingURL && isTemporaryFile(partURL) {
+            cleanupSet.insert(partURL)
+        }
+        cleanupURLs = Array(cleanupSet)
         
         var finalTranscription: String?
         
@@ -317,7 +505,19 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             #if DEBUG
             print("SimpleSpeechViewModel: Starting transcription for file: \(transcriptionURLToUse.lastPathComponent)")
             #endif
-            var result = try await simpleSpeechService.transcribe(audioFileURL: transcriptionURLToUse)
+            var partResults: [String] = []
+            for (index, partURL) in transcriptionParts.enumerated() {
+                if Task.isCancelled { return }
+                #if DEBUG
+                print("SimpleSpeechViewModel: Transcribing part \(index + 1) of \(transcriptionParts.count)")
+                #endif
+                let partResult = try await simpleSpeechService.transcribe(audioFileURL: partURL)
+                let trimmed = partResult.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    partResults.append(trimmed)
+                }
+            }
+            var result = partResults.joined(separator: " ")
             
             if Task.isCancelled { return }
             
@@ -390,7 +590,14 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             }
         } else {
             if let recordingURLToSave {
-                let newRecording = Recording(id: recordingId, startDate: startDate, relativeFilePath: recordingURLToSave.lastPathComponent, duration: duration, transcription: finalTranscription)
+                let newRecording = Recording(
+                    id: recordingId,
+                    startDate: startDate,
+                    relativeFilePath: recordingURLToSave.lastPathComponent,
+                    duration: duration,
+                    processedDuration: processedDuration,
+                    transcription: finalTranscription
+                )
                 self.recordings.insert(newRecording, at: 0)
                 saveRecordings()
             } else if finalTranscription != nil {
@@ -591,26 +798,75 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         return nil
     }
     
-    private func ensureRecordingFile(for recordingURL: URL, fallbackURL: URL) -> URL? {
+    private func ensureRecordingFile(
+        for recordingURL: URL,
+        processedURL: URL,
+        preferProcessed: Bool
+    ) -> URL? {
+        if preferProcessed {
+            if recordingURL == processedURL, isAudioFileUsable(recordingURL) {
+                return recordingURL
+            }
+            if let savedURL = copyProcessedRecording(
+                recordingURL: recordingURL,
+                processedURL: processedURL,
+                removeOriginal: true
+            ) {
+                return savedURL
+            }
+        }
+
         if isAudioFileUsable(recordingURL) {
             return recordingURL
         }
-        guard recordingURL != fallbackURL, isAudioFileUsable(fallbackURL) else { return nil }
-        
+
+        if recordingURL == processedURL, isAudioFileUsable(recordingURL) {
+            return recordingURL
+        }
+
+        return copyProcessedRecording(
+            recordingURL: recordingURL,
+            processedURL: processedURL,
+            removeOriginal: false
+        )
+    }
+
+    private func copyProcessedRecording(
+        recordingURL: URL,
+        processedURL: URL,
+        removeOriginal: Bool
+    ) -> URL? {
+        guard recordingURL != processedURL, isAudioFileUsable(processedURL) else { return nil }
+
+        let targetURL = recordingURLForProcessed(recordingURL: recordingURL, processedURL: processedURL)
+
         do {
-            let directory = recordingURL.deletingLastPathComponent()
+            let directory = targetURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: recordingURL.path) {
-                try FileManager.default.removeItem(at: recordingURL)
+            if FileManager.default.fileExists(atPath: targetURL.path) {
+                try FileManager.default.removeItem(at: targetURL)
             }
-            try FileManager.default.copyItem(at: fallbackURL, to: recordingURL)
-            return isAudioFileUsable(recordingURL) ? recordingURL : nil
+            try FileManager.default.copyItem(at: processedURL, to: targetURL)
+            if removeOriginal, targetURL != recordingURL, FileManager.default.fileExists(atPath: recordingURL.path) {
+                try? FileManager.default.removeItem(at: recordingURL)
+            }
+            return isAudioFileUsable(targetURL) ? targetURL : nil
         } catch {
             #if DEBUG
             print("SimpleSpeechViewModel: Failed to save recording file: \(error)")
             #endif
             return nil
         }
+    }
+
+    private func recordingURLForProcessed(recordingURL: URL, processedURL: URL) -> URL {
+        let processedExtension = processedURL.pathExtension
+        guard !processedExtension.isEmpty,
+              recordingURL.pathExtension.lowercased() != processedExtension.lowercased() else {
+            return recordingURL
+        }
+
+        return recordingURL.deletingPathExtension().appendingPathExtension(processedExtension)
     }
     
     private func isTemporaryFile(_ url: URL) -> Bool {

@@ -66,8 +66,8 @@ final class AudioProcessorTests: XCTestCase {
         
         // Logic check:
         // Input: 1s Sound + 4s Silence + 1s Sound = 6s.
-        // Logic: >2s (now 1s from user edit) silence is trimmed, keeping 0.5s padding.
-        // Expected: 1s + 0.5s + 1s = 2.5s.
+        // Logic: >2s (now 1s from user edit) silence is trimmed, keeping 0.5s leading and trailing padding.
+        // Expected: 1s + 0.5s + 0.5s + 1s = 3.0s.
         
         XCTAssertLessThan(finalDuration, initialDuration, "File duration should be reduced")
         XCTAssertGreaterThan(finalDuration, 1.5, "File should generally be around 2.5s")

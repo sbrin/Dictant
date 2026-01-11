@@ -96,6 +96,16 @@ struct RecordingRow: View {
                     Text(recording.formattedDuration)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .help("Original length")
+                    if recording.processedDuration != nil {
+                        Text("→")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(recording.formattedProcessedDuration)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .help("Processed length")
+                    }
                     
                     Text(recording.transcription != nil ? "" : "•")
                         .foregroundColor(.secondary)

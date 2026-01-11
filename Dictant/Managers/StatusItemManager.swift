@@ -134,14 +134,14 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.delegate = self
         applyAppearance(to: menu)
         
-        // 1. Action item
+        // Action item
         let actionItem = NSMenuItem()
         actionItem.tag = 101
         updateActionItem(actionItem)
         actionItem.target = self
         menu.addItem(actionItem)
         
-        // 2. Status item
+        // Status item
         let statusItemMenu = NSMenuItem()
         statusItemMenu.tag = 100
         updateStatusItem(statusItemMenu)
@@ -149,20 +149,29 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.addItem(statusItemMenu)
         
         menu.addItem(NSMenuItem.separator())
+
+        // Load File
+        let loadItem = NSMenuItem(title: "Load from File...", action: #selector(menuLoadFile), keyEquivalent: "")
+        loadItem.tag = 102
+        updateLoadItem(loadItem)
+        loadItem.target = self
+        menu.addItem(loadItem)
         
-        // 3. Settings
+        menu.addItem(NSMenuItem.separator())
+
+        // Settings
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(menuSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
         
-        // 4. History
+        // History
         let recordingsItem = NSMenuItem(title: "History...", action: #selector(menuRecordings), keyEquivalent: "")
         recordingsItem.target = self
         menu.addItem(recordingsItem)
-        
+
         menu.addItem(NSMenuItem.separator())
         
-        // 5. Quit
+        // Quit
         let quitItem = NSMenuItem(title: "Quit", action: #selector(menuQuit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -194,6 +203,10 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
         } else {
             item.isHidden = true
         }
+    }
+
+    private func updateLoadItem(_ item: NSMenuItem) {
+        item.isEnabled = !(viewModel.isRecording || viewModel.isProcessing)
     }
     
     // MARK: - NSMenuDelegate
@@ -228,6 +241,10 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
     @objc private func menuRecordings() {
         SettingsManager.shared.selectedTab = "History"
         showSettingsWindow()
+    }
+
+    @objc private func menuLoadFile() {
+        Task { await viewModel.loadAudioFile() }
     }
     
     func showSettingsWindow() {
@@ -288,6 +305,9 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
                     }
                     if let actionItem = menu.item(withTag: 101) {
                         self.updateActionItem(actionItem)
+                    }
+                    if let loadItem = menu.item(withTag: 102) {
+                        self.updateLoadItem(loadItem)
                     }
                 }
             }

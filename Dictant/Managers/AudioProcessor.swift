@@ -24,6 +24,12 @@ class AudioProcessor {
     /// Amount of silence (in seconds) to keep when a long pause is detected.
     /// This prevents the audio from sounding unnatural/choppy by leaving a small gap.
     private let silencePadding: TimeInterval = 0.5
+
+    /// Additional padding (in seconds) to keep before returning from a long pause.
+    /// This helps preserve quiet speech that starts below the silence threshold.
+    private let resumePadding: TimeInterval = 0.5
+
+    private let maxSplitBacktrack: TimeInterval = 30.0
     
     private init() {}
     
@@ -57,12 +63,9 @@ class AudioProcessor {
             AVLinearPCMIsNonInterleaved: false
         ]
         
-        let outputSettings = try await audioTrack.load(.formatDescriptions).first
-            .flatMap { CMFormatDescriptionGetExtensions($0) as? [String: Any] }
-        
         let trackOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: settings)
         reader.add(trackOutput)
-        
+
         // 2. Setup Output
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -133,6 +136,56 @@ class AudioProcessor {
             throw AudioProcessorError.processingFailed
         }
     }
+
+    /// Splits the audio file into two segments if it exceeds the given size limit.
+    /// - Returns: A list of segment URLs in order. Returns the original URL when no split is needed.
+    func splitAudioIfNeeded(at inputURL: URL, maxSizeBytes: Int64) async throws -> [URL] {
+        guard maxSizeBytes > 0,
+              let fileSize = fileSizeBytes(for: inputURL),
+              fileSize > maxSizeBytes else {
+            return [inputURL]
+        }
+
+        let asset = AVAsset(url: inputURL)
+        let duration = try await asset.load(.duration)
+        let durationSeconds = duration.seconds
+        let minSegmentDuration: Double = 1.0
+        guard durationSeconds.isFinite, durationSeconds > minSegmentDuration * 2 else {
+            return [inputURL]
+        }
+
+        let bytesPerSecond = Double(fileSize) / durationSeconds
+        guard bytesPerSecond > 0 else {
+            return [inputURL]
+        }
+
+        var targetSeconds = Double(maxSizeBytes) / bytesPerSecond
+        let maxSplitSeconds = durationSeconds - minSegmentDuration
+        targetSeconds = min(max(targetSeconds, minSegmentDuration), maxSplitSeconds)
+
+        let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+        let candidateTime = try await findSilenceSplitTime(asset: asset, targetTime: targetTime)
+        let rawCandidateSeconds = candidateTime?.seconds ?? targetSeconds
+        let candidateSeconds = rawCandidateSeconds.isFinite ? rawCandidateSeconds : targetSeconds
+        let splitSeconds = min(max(candidateSeconds, minSegmentDuration), maxSplitSeconds)
+        let splitTime = CMTime(seconds: splitSeconds, preferredTimescale: 600)
+
+        #if DEBUG
+        let splitSource = candidateTime == nil ? "target" : "silence"
+        print(String(format: "AudioProcessor: Splitting at %.2fs (%@).", splitSeconds, splitSource))
+        #endif
+
+        let firstRange = CMTimeRange(start: .zero, duration: splitTime)
+        let secondRange = CMTimeRange(
+            start: splitTime,
+            duration: CMTime(seconds: durationSeconds - splitSeconds, preferredTimescale: 600)
+        )
+
+        let firstURL = try await exportSegment(asset: asset, timeRange: firstRange)
+        let secondURL = try await exportSegment(asset: asset, timeRange: secondRange)
+
+        return [firstURL, secondURL]
+    }
     
     // MARK: - Private Processing Logic
     
@@ -155,6 +208,8 @@ class AudioProcessor {
             
             // Pending silent buffers that we might write if the silence isn't long enough
             var pendingBuffers: [(CMSampleBuffer, CMTime)] = [] // (buffer, originalPTS)
+            var trailingSilenceBuffers: [(CMSampleBuffer, CMTime)] = [] // (buffer, originalPTS)
+            var trailingSilenceDuration: CMTime = .zero
             
             // Output buffering to handle backpressure
             var outgoingBuffers: [CMSampleBuffer] = []
@@ -181,6 +236,31 @@ class AudioProcessor {
                     }
                 }
                 return true
+            }
+
+            func enqueueBuffer(_ buffer: CMSampleBuffer, originalPts: CMTime) {
+                let offset = outputTimeOffset == .invalid ? originalPts : outputTimeOffset
+                if outputTimeOffset == .invalid { outputTimeOffset = originalPts }
+
+                let newPts = CMTimeSubtract(originalPts, offset)
+                if let newBuffer = self.copyBufferWithNewPTS(buffer, newPts: newPts) {
+                    outgoingBuffers.append(newBuffer)
+                    lastWrittenTime = CMTimeAdd(newPts, CMSampleBufferGetDuration(buffer))
+                }
+            }
+
+            func appendTrailingBuffer(_ buffer: CMSampleBuffer, pts: CMTime, maxDuration: CMTime) {
+                trailingSilenceBuffers.append((buffer, pts))
+                let bufferDuration = CMSampleBufferGetDuration(buffer)
+                let safeDuration = bufferDuration.isValid ? bufferDuration : .zero
+                trailingSilenceDuration = CMTimeAdd(trailingSilenceDuration, safeDuration)
+
+                while CMTimeCompare(trailingSilenceDuration, maxDuration) == 1, !trailingSilenceBuffers.isEmpty {
+                    let removed = trailingSilenceBuffers.removeFirst()
+                    let removedDuration = CMSampleBufferGetDuration(removed.0)
+                    let safeRemovedDuration = removedDuration.isValid ? removedDuration : .zero
+                    trailingSilenceDuration = CMTimeSubtract(trailingSilenceDuration, safeRemovedDuration)
+                }
             }
             
             writerInput.requestMediaDataWhenReady(on: queue) {
@@ -218,28 +298,14 @@ class AudioProcessor {
                                 
                                 for (pBuf, pPts) in pendingBuffers {
                                     if keptAccumulator < keepDuration {
-                                        let offset = outputTimeOffset == .invalid ? pPts : outputTimeOffset
-                                        if outputTimeOffset == .invalid { outputTimeOffset = pPts }
-                                        
-                                        let newPts = CMTimeSubtract(pPts, offset)
-                                        if let newBuffer = self.copyBufferWithNewPTS(pBuf, newPts: newPts) {
-                                            outgoingBuffers.append(newBuffer)
-                                            lastWrittenTime = CMTimeAdd(newPts, CMSampleBufferGetDuration(pBuf))
-                                        }
+                                        enqueueBuffer(pBuf, originalPts: pPts)
                                         keptAccumulator = CMTimeAdd(keptAccumulator, CMSampleBufferGetDuration(pBuf))
                                     }
                                 }
                             } else {
                                 // Short silence at end - keep all
                                 for (pBuf, pPts) in pendingBuffers {
-                                    let offset = outputTimeOffset == .invalid ? pPts : outputTimeOffset
-                                    if outputTimeOffset == .invalid { outputTimeOffset = pPts }
-                                    
-                                    let newPts = CMTimeSubtract(pPts, offset)
-                                    if let newBuffer = self.copyBufferWithNewPTS(pBuf, newPts: newPts) {
-                                        outgoingBuffers.append(newBuffer)
-                                        lastWrittenTime = CMTimeAdd(newPts, CMSampleBufferGetDuration(pBuf))
-                                    }
+                                    enqueueBuffer(pBuf, originalPts: pPts)
                                 }
                             }
                         }
@@ -252,8 +318,7 @@ class AudioProcessor {
                     }
                     
                     let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-                    let duration = CMSampleBufferGetDuration(buffer)
-                    
+
                     // analyze
                     let isSilent = self.isBufferSilent(buffer, thresholdDb: self.silenceThresholdDb)
                     
@@ -270,6 +335,11 @@ class AudioProcessor {
                         if currentSilenceDuration < self.minSilenceDuration {
                             pendingBuffers.append((buffer, pts))
                         }
+
+                        let trailingDuration = CMTime(seconds: self.resumePadding, preferredTimescale: pts.timescale)
+                        if self.resumePadding > 0 {
+                            appendTrailingBuffer(buffer, pts: pts, maxDuration: trailingDuration)
+                        }
                     } else {
                         // Not silent
                         if isSilentSequence {
@@ -278,23 +348,37 @@ class AudioProcessor {
                             
                             if silenceDuration > self.minSilenceDuration {
                                 // Long pause. We trim it.
-                                // We keep the FIRST `silencePadding` of the silence block.
+                                // We keep the FIRST `silencePadding` and a small tail before audio resumes.
                                 
                                 let keepDuration = CMTime(seconds: self.silencePadding, preferredTimescale: pts.timescale)
                                 var keptAccumulator = CMTime.zero
+                                var leadingEndPts: CMTime?
                                 
                                 for (pBuf, pPts) in pendingBuffers {
                                     if keptAccumulator < keepDuration {
                                         // Write this silent buffer with offset
-                                        let offset = outputTimeOffset == .invalid ? pPts : outputTimeOffset
-                                        if outputTimeOffset == .invalid { outputTimeOffset = pPts }
-                                        
-                                        let newPts = CMTimeSubtract(pPts, offset)
-                                        if let newBuffer = self.copyBufferWithNewPTS(pBuf, newPts: newPts) {
-                                            outgoingBuffers.append(newBuffer)
-                                            lastWrittenTime = CMTimeAdd(newPts, CMSampleBufferGetDuration(pBuf))
+                                        enqueueBuffer(pBuf, originalPts: pPts)
+                                        let bufferDuration = CMSampleBufferGetDuration(pBuf)
+                                        keptAccumulator = CMTimeAdd(keptAccumulator, bufferDuration)
+                                        leadingEndPts = CMTimeAdd(pPts, bufferDuration)
+                                    }
+                                }
+
+                                var keptTrailingBuffers: [(CMSampleBuffer, CMTime)] = []
+                                if self.resumePadding > 0 {
+                                    for (tBuf, tPts) in trailingSilenceBuffers {
+                                        if let leadingEndPts, leadingEndPts.isValid,
+                                           CMTimeCompare(tPts, leadingEndPts) == -1 {
+                                            continue
                                         }
-                                        keptAccumulator = CMTimeAdd(keptAccumulator, CMSampleBufferGetDuration(pBuf))
+                                        keptTrailingBuffers.append((tBuf, tPts))
+                                    }
+                                }
+
+                                if let firstTrailing = keptTrailingBuffers.first {
+                                    outputTimeOffset = CMTimeSubtract(firstTrailing.1, lastWrittenTime)
+                                    for (tBuf, tPts) in keptTrailingBuffers {
+                                        enqueueBuffer(tBuf, originalPts: tPts)
                                     }
                                 }
                                 
@@ -304,32 +388,20 @@ class AudioProcessor {
                             } else {
                                 // Short pause. Keep all.
                                 for (pBuf, pPts) in pendingBuffers {
-                                    let offset = outputTimeOffset == .invalid ? pPts : outputTimeOffset
-                                    if outputTimeOffset == .invalid { outputTimeOffset = pPts }
-                                    
-                                    let newPts = CMTimeSubtract(pPts, offset)
-                                    if let newBuffer = self.copyBufferWithNewPTS(pBuf, newPts: newPts) {
-                                        outgoingBuffers.append(newBuffer)
-                                        lastWrittenTime = CMTimeAdd(newPts, CMSampleBufferGetDuration(pBuf))
-                                    }
+                                    enqueueBuffer(pBuf, originalPts: pPts)
                                 }
                             }
                             
                             // Reset state
                             isSilentSequence = false
                             pendingBuffers.removeAll()
+                            trailingSilenceBuffers.removeAll()
+                            trailingSilenceDuration = .zero
                             silenceStartTime = .invalid
                         }
                         
                         // Write current non-silent buffer
-                        let offset = outputTimeOffset == .invalid ? pts : outputTimeOffset
-                        if outputTimeOffset == .invalid { outputTimeOffset = pts }
-                        
-                        let newPts = CMTimeSubtract(pts, offset)
-                        if let newBuffer = self.copyBufferWithNewPTS(buffer, newPts: newPts) {
-                            outgoingBuffers.append(newBuffer)
-                            lastWrittenTime = CMTimeAdd(newPts, duration)
-                        }
+                        enqueueBuffer(buffer, originalPts: pts)
                     }
                     
                     // Attempt to flush after each processing step
@@ -375,6 +447,7 @@ class AudioProcessor {
         
         return db < thresholdDb
     }
+
     
     private func copyBufferWithNewPTS(_ buffer: CMSampleBuffer, newPts: CMTime) -> CMSampleBuffer? {
         var count: CMItemCount = 0
@@ -398,6 +471,102 @@ class AudioProcessor {
         )
         return newBuffer
     }
+
+    private func findSilenceSplitTime(asset: AVAsset, targetTime: CMTime) async throws -> CMTime? {
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let audioTrack = tracks.first else {
+            throw AudioProcessorError.noAudioTrack
+        }
+
+        let reader = try AVAssetReader(asset: asset)
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+
+        let trackOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: settings)
+        reader.add(trackOutput)
+        reader.timeRange = CMTimeRange(start: .zero, duration: targetTime)
+
+        guard reader.startReading() else {
+            throw AudioProcessorError.readerFailed(reader.error?.localizedDescription ?? "Unknown error")
+        }
+
+        let minCandidateSeconds = max(targetTime.seconds - maxSplitBacktrack, 0)
+        var lastCandidate: CMTime?
+        var silenceStart: CMTime = .invalid
+        var isSilentSequence = false
+
+        while let buffer = trackOutput.copyNextSampleBuffer() {
+            let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+            let isSilent = self.isBufferSilent(buffer, thresholdDb: self.silenceThresholdDb)
+
+            if isSilent {
+                if !isSilentSequence {
+                    isSilentSequence = true
+                    silenceStart = pts
+                }
+            } else {
+                if isSilentSequence && silenceStart.isValid {
+                    let silenceDuration = CMTimeGetSeconds(CMTimeSubtract(pts, silenceStart))
+                    if silenceDuration >= self.minSilenceDuration,
+                       silenceStart.seconds >= minCandidateSeconds {
+                        lastCandidate = silenceStart
+                    }
+                }
+                isSilentSequence = false
+                silenceStart = .invalid
+            }
+        }
+
+        if isSilentSequence && silenceStart.isValid && silenceStart.seconds >= minCandidateSeconds {
+            return silenceStart
+        }
+
+        return lastCandidate
+    }
+
+    private func exportSegment(asset: AVAsset, timeRange: CMTimeRange) async throws -> URL {
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw AudioProcessorError.exportFailed("Unable to create export session")
+        }
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("m4a")
+
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        exportSession.timeRange = timeRange
+        exportSession.shouldOptimizeForNetworkUse = true
+
+        await withCheckedContinuation { continuation in
+            exportSession.exportAsynchronously {
+                continuation.resume(returning: ())
+            }
+        }
+
+        if exportSession.status == .completed,
+           let attributes = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+           let size = attributes[.size] as? NSNumber,
+           size.int64Value > 0 {
+            return outputURL
+        }
+
+        let errorMessage = exportSession.error?.localizedDescription ?? "Unknown error"
+        throw AudioProcessorError.exportFailed(errorMessage)
+    }
+
+    private func fileSizeBytes(for url: URL) -> Int64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.int64Value
+    }
 }
 
 enum AudioProcessorError: Error {
@@ -405,4 +574,5 @@ enum AudioProcessorError: Error {
     case readerFailed(String)
     case writerFailed(String)
     case processingFailed
+    case exportFailed(String)
 }

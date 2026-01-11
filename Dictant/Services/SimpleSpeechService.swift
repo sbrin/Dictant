@@ -10,8 +10,18 @@ import Combine
 @MainActor
 class SimpleSpeechService {
     static let shared = SimpleSpeechService()
+    static let maxAudioPayloadBytes: Int64 = 5_000 * 1024
+
+    private static let transcriptionRequestTimeout: TimeInterval = 300.0
+    private static let transcriptionResourceTimeout: TimeInterval = 1200.0
     
     private let settingsManager = SettingsManager.shared
+    private lazy var transcriptionSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = Self.transcriptionRequestTimeout
+        config.timeoutIntervalForResource = Self.transcriptionResourceTimeout
+        return URLSession(configuration: config)
+    }()
     
     enum ServiceError: Error, Equatable {
         case invalidAPIKey
@@ -95,7 +105,7 @@ class SimpleSpeechService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await transcriptionSession.data(for: request)
         } catch {
             throw ServiceError.networkError(error.localizedDescription)
         }
