@@ -4,23 +4,34 @@ Dictant is a tiny (<1 MB) macOS menu bar push-to-talk app that turns your voice 
 
 Free and open-source — there are no paywalls, you only cover your own OpenAI API usage.
 
+**[Download the latest version from the Releases page](https://github.com/sbrin/Dictant/releases)**
+
 ## Why Dictant
-- Built for speed: hold the right Command key or tap the menu bar icon to start/stop recording in a second.
-- Clipboard automation: copy and optionally paste the result straight into the active app.
-- Reliable status cues: menu bar icon blinks red while recording and green while processing.
-- Smart post-processing: optional ChatGPT pass with your own system prompt for better output.
-- Persistent history: recordings and transcripts live locally so you can retry failed jobs.
-- macOS-first: SwiftUI, native notifications, Keychain storage
+- *Built for speed*: hold the right Command key or tap the menu bar icon to start/stop recording in a second.
+- *Clipboard automation*: copy and optionally paste the result straight into the active app.
+- *Reliable status cues*: menu bar icon blinks red while recording and green while processing.
+- *Smart post-processing*: optional ChatGPT pass with your own system prompt for better output.
+- *Persistent history*: recordings and transcripts live locally so you can retry failed jobs.
+- *macOS-first*: SwiftUI, native notifications, Keychain storage
 
 ## Core Features
 - **Push-to-talk**: Hold the right ⌘ (Command key) for 1 second to start recording; release to stop
-- **Menu bar workflow**: Left-click to toggle recording, right-click for quick actions (start/stop, settings, history, quit).
-- **Clipboard & paste**: Copy transcripts to the clipboard; optionally auto-paste into the active text field (requires Accessibility).
+- **Clipboard & paste**: Copy transcripts to the clipboard; auto-paste into the active text field (requires Accessibility).
 - **ChatGPT post-processing**: Run transcripts through GPT with your custom system prompt.
 - **History & retries**: Browse recordings, re-run failed/pending transcriptions, copy or open files in Finder, and clear history.
-- **Launch at login**: Keep Dictant running in the background after reboot.
 - **Smart Silence Removal**: Automatically trims long pauses and silence from your audio before processing to improve transcription accuracy and reduce API usage.
 - **Privacy-aware**: API key stays in Keychain, audio files stay local (Application Support), only the transcription request hits OpenAI.
+
+## Quick Start
+1. Launch the app; it lives in the menu bar.
+2. Open `Settings → Processing`, paste your OpenAI API key, and save it (stored in Keychain).
+3. Press and hold the right Command key for 1s to start talking, then release to stop. Or click the menu bar icon to toggle.
+4. Optional tweaks in `Settings → General`:
+   - Run at system startup
+   - Enable push-to-talk
+   - Copy to clipboard
+   - Paste into the active input
+5. Check `Settings → History` for transcripts; copy, re-run, or open recordings from there.
 
 ## Requirements
 - macOS 14.0+ (built with Xcode 15+)
@@ -33,31 +44,15 @@ Free and open-source — there are no paywalls, you only cover your own OpenAI A
 3. Build and run the `Dictant` target.
 4. Grant microphone access when prompted.
 
-## Build a DMG
-Use the bundled helper script plus `create-dmg` for a polished installer.
-
-1. Install the utility: `brew install create-dmg`.
-2. Build a universal Release app bundle (Xcode or `xcodebuild -scheme Dictant -configuration Release -destination 'generic/platform=macOS' -derivedDataPath build/DerivedData ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO`).
-3. Package it: `./packaging/create_dmg.sh` (override paths with `./packaging/create_dmg.sh /path/to/Dictant.app CustomName.dmg`).
-4. For a one-shot build + DMG from the terminal: `./packaging/build_and_dmg.sh` (override with env vars like `DERIVED_DATA=build/DerivedData DMG_NAME=Custom.dmg ARCHS="arm64 x86_64"`).
-
 ## Build a PKG
 Use the bundled helper scripts to create a standard macOS installer package.
+** PKG Installer requires extra privacy and security permission via System Settings **
 
 Build and package in one shot: `./packaging/build_and_pkg.sh`
 
-## Quick Start
-1. Launch the app; it lives in the menu bar.
-2. Open `Settings → Processing`, paste your OpenAI API key, and save it (stored in Keychain).
-3. Optional tweaks in `Settings → General`:
-   - Run at system startup
-   - Copy to clipboard / paste into the active input
-   - Enable push-to-talk
-4. Press and hold the right Command key for 1s to start talking, then release to stop. Or click the menu bar icon to toggle.
-5. Check `Settings → History` for transcripts; copy, re-run, or open recordings from there.
 
 ## Usage Notes
-- **Menu bar icon states**: solid icon (idle), blinking red (recording), blinking green (processing).
+- **Menu bar and pointer states**: solid icon (idle), blinking red (recording), blinking green (processing).
 - **Status menu (right-click)**: start/stop, cancel processing, open settings, open history, quit.
 - **Auto-paste**: Requires Accessibility permission; if missing, the app will prompt and temporarily disable paste until trusted.
 - **ChatGPT prompt**: Set your own system prompt to shape the post-processed text (defaults to a polishing prompt).
