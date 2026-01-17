@@ -703,10 +703,10 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         }
         
         let pasteboard = NSPasteboard.general
-        var previousItems: [NSPasteboardItem]?
+        var previousItems: [PasteboardSnapshotItem] = []
         
         if canPaste && !shouldCopy {
-            previousItems = pasteboard.pasteboardItems
+            previousItems = snapshotPasteboardItems(from: pasteboard)
         }
         
         pasteboard.clearContents()
@@ -721,8 +721,8 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
             try? await Task.sleep(nanoseconds: 200 * 1_000_000) // 200ms
             
             pasteboard.clearContents()
-            if let items = previousItems, !items.isEmpty {
-                pasteboard.writeObjects(items)
+            if !previousItems.isEmpty {
+                restorePasteboardItems(previousItems, to: pasteboard)
             }
         }
         
@@ -745,6 +745,35 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         default:
             return ""
         }
+    }
+
+    private struct PasteboardSnapshotItem {
+        let dataByType: [NSPasteboard.PasteboardType: Data]
+    }
+
+    private func snapshotPasteboardItems(from pasteboard: NSPasteboard) -> [PasteboardSnapshotItem] {
+        guard let items = pasteboard.pasteboardItems, !items.isEmpty else { return [] }
+        return items.compactMap { item in
+            var dataByType: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    dataByType[type] = data
+                }
+            }
+            return dataByType.isEmpty ? nil : PasteboardSnapshotItem(dataByType: dataByType)
+        }
+    }
+
+    private func restorePasteboardItems(_ items: [PasteboardSnapshotItem], to pasteboard: NSPasteboard) {
+        guard !items.isEmpty else { return }
+        let restoredItems = items.map { snapshot -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in snapshot.dataByType {
+                item.setData(data, forType: type)
+            }
+            return item
+        }
+        pasteboard.writeObjects(restoredItems)
     }
     
     private func ensureAccessibilityPermissionForPasting() -> Bool {
