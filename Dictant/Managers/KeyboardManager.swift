@@ -35,7 +35,7 @@ class KeyboardManager: NSObject {
             print("KeyboardManager: Global Right Command FlagsChanged - Flags: \(event.modifierFlags)")
             #endif
             Task { @MainActor in
-                self?.handleFlagsChanged(event)
+                self.handleFlagsChanged(event)
             }
         }
         
@@ -45,7 +45,7 @@ class KeyboardManager: NSObject {
             #if DEBUG
             print("KeyboardManager: Local Right Command FlagsChanged - Flags: \(event.modifierFlags)")
             #endif
-            self?.handleFlagsChanged(event)
+            self.handleFlagsChanged(event)
             return event
         }
         
