@@ -224,7 +224,8 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.audio]
+        let allowedExtensions = ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"]
+        panel.allowedContentTypes = allowedExtensions.compactMap { UTType(filenameExtension: $0) }
 
         guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
 

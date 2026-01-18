@@ -238,7 +238,22 @@ class SimpleSpeechService {
             }
         }
         
-        let mimeType = filename.hasSuffix(".wav") ? "audio/wav" : "audio/m4a"
+        let fileExtension = (filename as NSString).pathExtension.lowercased()
+        let mimeType: String
+        switch fileExtension {
+        case "wav":
+            mimeType = "audio/wav"
+        case "mp3", "mpga", "mpeg":
+            mimeType = "audio/mpeg"
+        case "mp4":
+            mimeType = "video/mp4"
+        case "m4a":
+            mimeType = "audio/m4a"
+        case "webm":
+            mimeType = "audio/webm"
+        default:
+            mimeType = "audio/m4a"
+        }
         
         append("--\(boundary)\(lineBreak)")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\(lineBreak)")
