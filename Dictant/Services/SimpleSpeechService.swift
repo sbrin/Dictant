@@ -10,16 +10,12 @@ import Combine
 @MainActor
 class SimpleSpeechService {
     static let shared = SimpleSpeechService()
-    static let maxAudioPayloadBytes: Int64 = 5_000 * 1024
-
-    private static let transcriptionRequestTimeout: TimeInterval = 300.0
-    private static let transcriptionResourceTimeout: TimeInterval = 1200.0
     
     private let settingsManager = SettingsManager.shared
     private lazy var transcriptionSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = Self.transcriptionRequestTimeout
-        config.timeoutIntervalForResource = Self.transcriptionResourceTimeout
+        config.timeoutIntervalForRequest = Constants.SimpleSpeech.transcriptionRequestTimeout
+        config.timeoutIntervalForResource = Constants.SimpleSpeech.transcriptionResourceTimeout
         return URLSession(configuration: config)
     }()
     

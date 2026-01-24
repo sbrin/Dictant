@@ -96,9 +96,9 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64000,
+            AVSampleRateKey: Constants.Audio.sampleRate,
+            AVNumberOfChannelsKey: Constants.Audio.channelCount,
+            AVEncoderBitRateKey: Constants.Audio.bitRate,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
         
@@ -112,7 +112,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
                 self.recordingDuration = "00:00"
                 
                 durationTimer?.invalidate()
-                let dTimer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+                let dTimer = Timer(timeInterval: Constants.UI.timerInterval, repeats: true) { [weak self] _ in
                     Task { @MainActor in
                         guard let self = self, let start = self.currentRecordingStartDate else { return }
                         let elapsed = Date().timeIntervalSince(start)
@@ -155,7 +155,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         #if DEBUG
         print(String(format: "SimpleSpeechViewModel: Recording stopped. Duration: %.2fs, File: %@", recordedDuration, recordingURL.path))
         #endif
-        if recordedDuration < 2 {
+        if recordedDuration < Constants.Audio.minRecordingDuration {
             try? FileManager.default.removeItem(at: recordingURL)
             self.audioRecorder = nil
             self.currentRecordingId = nil
@@ -376,7 +376,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
     }
 
     private func isTooShortTranscriptionDuration(_ duration: TimeInterval) -> Bool {
-        duration.isFinite && duration > 0 && duration < 1.0
+        duration.isFinite && duration > 0 && duration < Constants.Audio.minSegmentDuration
     }
 
     private func handleTooShortTranscription(
@@ -483,7 +483,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         do {
             transcriptionParts = try await AudioProcessor.shared.splitAudioIfNeeded(
                 at: transcriptionURLToUse,
-                maxSizeBytes: SimpleSpeechService.maxAudioPayloadBytes
+                maxSizeBytes: Constants.SimpleSpeech.maxAudioPayloadBytes
             )
         } catch {
             #if DEBUG
@@ -719,7 +719,7 @@ class SimpleSpeechViewModel: NSObject, ObservableObject, AVAudioRecorderDelegate
         
         if !shouldCopy {
             // Wait a tiny bit for the OS to process the paste event before clearing/restoring the clipper
-            try? await Task.sleep(nanoseconds: 200 * 1_000_000) // 200ms
+            try? await Task.sleep(nanoseconds: Constants.UI.clipboardRestoreDelayNanoseconds) // 200ms
             
             pasteboard.clearContents()
             if !previousItems.isEmpty {

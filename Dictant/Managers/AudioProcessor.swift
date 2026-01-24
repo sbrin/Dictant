@@ -15,21 +15,7 @@ class AudioProcessor {
     // MARK: - Configuration
     
     /// The threshold in decibels below which audio is considered "silence".
-    private let silenceThresholdDb: Float = -35.0
-    
-    /// The minimum duration of silence (in seconds) that we want to remove.
-    /// Pauses longer than this will be shortened.
-    private let minSilenceDuration: TimeInterval = 1.0
-    
-    /// Amount of silence (in seconds) to keep when a long pause is detected.
-    /// This prevents the audio from sounding unnatural/choppy by leaving a small gap.
-    private let silencePadding: TimeInterval = 0.5
 
-    /// Additional padding (in seconds) to keep before returning from a long pause.
-    /// This helps preserve quiet speech that starts below the silence threshold.
-    private let resumePadding: TimeInterval = 0.5
-
-    private let maxSplitBacktrack: TimeInterval = 30.0
     
     private init() {}
     
@@ -50,7 +36,7 @@ class AudioProcessor {
 
         // Check duration - skip if less than 1 second
         let duration = try await asset.load(.duration).seconds
-        if duration < 1.0 {
+        if duration < Constants.Audio.minSegmentDuration {
             return inputURL
         }
         
@@ -80,9 +66,9 @@ class AudioProcessor {
         
         let writerOutputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64000,
+            AVSampleRateKey: Constants.Audio.sampleRate,
+            AVNumberOfChannelsKey: Constants.Audio.channelCount,
+            AVEncoderBitRateKey: Constants.Audio.bitRate,
             AVChannelLayoutKey: Data(bytes: &channelLayout, count: MemoryLayout<AudioChannelLayout>.size)
         ]
         
@@ -149,7 +135,7 @@ class AudioProcessor {
         let asset = AVAsset(url: inputURL)
         let duration = try await asset.load(.duration)
         let durationSeconds = duration.seconds
-        let minSegmentDuration: Double = 1.0
+        let minSegmentDuration: Double = Constants.Audio.minSegmentDuration
         guard durationSeconds.isFinite, durationSeconds > minSegmentDuration * 2 else {
             return [inputURL]
         }
@@ -291,9 +277,9 @@ class AudioProcessor {
                             let silenceDuration = CMTimeGetSeconds(CMTimeSubtract(lastWrittenTime.isValid ? lastWrittenTime : silenceStartTime, silenceStartTime))
                             let pendingDuration = pendingBuffers.reduce(0.0) { $0 + CMSampleBufferGetDuration($1.0).seconds }
                              
-                            if pendingDuration > self.minSilenceDuration {
+                            if pendingDuration > Constants.Audio.minSilenceDuration {
                                 // Trim end silence
-                                let keepDuration = CMTime(seconds: self.silencePadding, preferredTimescale: 1000000)
+                                let keepDuration = CMTime(seconds: Constants.Audio.silencePadding, preferredTimescale: 1000000)
                                 var keptAccumulator = CMTime.zero
                                 
                                 for (pBuf, pPts) in pendingBuffers {
@@ -320,7 +306,7 @@ class AudioProcessor {
                     let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
 
                     // analyze
-                    let isSilent = self.isBufferSilent(buffer, thresholdDb: self.silenceThresholdDb)
+                    let isSilent = self.isBufferSilent(buffer, thresholdDb: Constants.Audio.silenceThresholdDb)
                     
                     if isSilent {
                         if !isSilentSequence {
@@ -332,12 +318,12 @@ class AudioProcessor {
                         // Optimization: If we already have enough silence buffered to cover the "keep" duration,
                         // we can stop buffering to save memory on long pauses.
                         let currentSilenceDuration = CMTimeGetSeconds(CMTimeSubtract(pts, silenceStartTime))
-                        if currentSilenceDuration < self.minSilenceDuration {
+                        if currentSilenceDuration < Constants.Audio.minSilenceDuration {
                             pendingBuffers.append((buffer, pts))
                         }
 
-                        let trailingDuration = CMTime(seconds: self.resumePadding, preferredTimescale: pts.timescale)
-                        if self.resumePadding > 0 {
+                        let trailingDuration = CMTime(seconds: Constants.Audio.resumePadding, preferredTimescale: pts.timescale)
+                        if Constants.Audio.resumePadding > 0 {
                             appendTrailingBuffer(buffer, pts: pts, maxDuration: trailingDuration)
                         }
                     } else {
@@ -346,11 +332,11 @@ class AudioProcessor {
                             // End of silence block
                             let silenceDuration = CMTimeGetSeconds(CMTimeSubtract(pts, silenceStartTime))
                             
-                            if silenceDuration > self.minSilenceDuration {
+                            if silenceDuration > Constants.Audio.minSilenceDuration {
                                 // Long pause. We trim it.
                                 // We keep the FIRST `silencePadding` and a small tail before audio resumes.
                                 
-                                let keepDuration = CMTime(seconds: self.silencePadding, preferredTimescale: pts.timescale)
+                                let keepDuration = CMTime(seconds: Constants.Audio.silencePadding, preferredTimescale: pts.timescale)
                                 var keptAccumulator = CMTime.zero
                                 var leadingEndPts: CMTime?
                                 
@@ -365,7 +351,7 @@ class AudioProcessor {
                                 }
 
                                 var keptTrailingBuffers: [(CMSampleBuffer, CMTime)] = []
-                                if self.resumePadding > 0 {
+                                if Constants.Audio.resumePadding > 0 {
                                     for (tBuf, tPts) in trailingSilenceBuffers {
                                         if let leadingEndPts, leadingEndPts.isValid,
                                            CMTimeCompare(tPts, leadingEndPts) == -1 {
@@ -495,14 +481,14 @@ class AudioProcessor {
             throw AudioProcessorError.readerFailed(reader.error?.localizedDescription ?? "Unknown error")
         }
 
-        let minCandidateSeconds = max(targetTime.seconds - maxSplitBacktrack, 0)
+        let minCandidateSeconds = max(targetTime.seconds - Constants.Audio.maxSplitBacktrack, 0)
         var lastCandidate: CMTime?
         var silenceStart: CMTime = .invalid
         var isSilentSequence = false
 
         while let buffer = trackOutput.copyNextSampleBuffer() {
             let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-            let isSilent = self.isBufferSilent(buffer, thresholdDb: self.silenceThresholdDb)
+            let isSilent = self.isBufferSilent(buffer, thresholdDb: Constants.Audio.silenceThresholdDb)
 
             if isSilent {
                 if !isSilentSequence {
@@ -512,7 +498,7 @@ class AudioProcessor {
             } else {
                 if isSilentSequence && silenceStart.isValid {
                     let silenceDuration = CMTimeGetSeconds(CMTimeSubtract(pts, silenceStart))
-                    if silenceDuration >= self.minSilenceDuration,
+                    if silenceDuration >= Constants.Audio.minSilenceDuration,
                        silenceStart.seconds >= minCandidateSeconds {
                         lastCandidate = silenceStart
                     }

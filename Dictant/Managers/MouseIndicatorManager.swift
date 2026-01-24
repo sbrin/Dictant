@@ -21,8 +21,7 @@ final class MouseIndicatorManager: NSObject {
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
 
-    private let dotSize: CGFloat = 10
-    private let dotOffset = CGPoint(x: 15, y: -15)
+
 
     private override init() {
         super.init()
@@ -63,7 +62,7 @@ final class MouseIndicatorManager: NSObject {
         if flashTimer == nil {
             isFlashedOn = true
             showIndicator()
-            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: Constants.UI.flashTimerInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     self.isFlashedOn.toggle()
@@ -100,7 +99,7 @@ final class MouseIndicatorManager: NSObject {
     private func ensureIndicatorWindow() {
         guard indicatorWindow == nil else { return }
 
-        let frame = NSRect(x: 0, y: 0, width: dotSize, height: dotSize)
+        let frame = NSRect(x: 0, y: 0, width: Constants.UI.mouseIndicatorDotSize, height: Constants.UI.mouseIndicatorDotSize)
         let dotView = MouseIndicatorDotView(frame: frame)
 
         let panel = NSPanel(
@@ -127,8 +126,8 @@ final class MouseIndicatorManager: NSObject {
         guard indicatorWindow != nil else { return }
         let mouseLocation = NSEvent.mouseLocation
         let origin = NSPoint(
-            x: mouseLocation.x + dotOffset.x - dotSize / 2,
-            y: mouseLocation.y + dotOffset.y - dotSize / 2
+            x: mouseLocation.x + Constants.UI.mouseIndicatorDotOffset.x - Constants.UI.mouseIndicatorDotSize / 2,
+            y: mouseLocation.y + Constants.UI.mouseIndicatorDotOffset.y - Constants.UI.mouseIndicatorDotSize / 2
         )
         indicatorWindow?.setFrameOrigin(origin)
     }

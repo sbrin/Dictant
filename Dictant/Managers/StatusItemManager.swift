@@ -18,7 +18,7 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
     private var flashDotColor: NSColor?
     private weak var activeMenu: NSMenu?
     private var settingsWindow: NSWindow?
-    private let statusIconSize = NSSize(width: 22, height: 22)
+    private let statusIconSize = NSSize(width: Constants.UI.statusIconSize, height: Constants.UI.statusIconSize)
     private var appearanceObservation: NSKeyValueObservation?
     
     private func applyAppearance(to menu: NSMenu) {
@@ -105,8 +105,8 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
             baseImage.draw(in: drawRect, from: NSRect(origin: .zero, size: baseImage.size), operation: .destinationIn, fraction: 1.0)
             
             if let dotColor = dotColor {
-                let dotSize: CGFloat = 11.0
-                let dotRect = NSRect(x: (statusIconSize.width - dotSize) / 2, y: 9, width: dotSize, height: dotSize)
+                let dotSize = Constants.UI.statusItemDotSize
+                let dotRect = NSRect(x: (statusIconSize.width - dotSize) / 2, y: Constants.UI.statusItemDotYOffset, width: dotSize, height: dotSize)
                 dotColor.setFill()
                 let path = NSBezierPath(ovalIn: dotRect)
                 path.fill()
@@ -336,7 +336,7 @@ class StatusItemManager: NSObject, NSMenuDelegate, NSWindowDelegate {
             isFlashedOn = true
             setStatusIcon(dotColor: dotColor)
             
-            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: Constants.UI.flashTimerInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     self.isFlashedOn.toggle()

@@ -12,7 +12,7 @@ class KeyboardManager: NSObject {
     static let shared = KeyboardManager()
     
     private let settingsManager = SettingsManager.shared
-    private let rightCommandKeyCode: UInt16 = 54
+    private let rightCommandKeyCode = Constants.Keyboard.rightCommandKeyCode
     private var isRightCommandPressed = false
     private var pttTimer: Timer?
     private var isPTTActive = false
@@ -88,7 +88,7 @@ class KeyboardManager: NSObject {
         print("KeyboardManager: Starting 0.5s PTT timer...")
         #endif
         pttTimer?.invalidate()
-        pttTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+        pttTimer = Timer.scheduledTimer(withTimeInterval: Constants.Keyboard.pttDelay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.activatePTT()
             }
