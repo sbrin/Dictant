@@ -85,7 +85,7 @@ class KeyboardManager: NSObject {
     
     private func startPTTTimer() {
         #if DEBUG
-        print("KeyboardManager: Starting 0.5s PTT timer...")
+        print("KeyboardManager: Starting 0.3s PTT timer...")
         #endif
         pttTimer?.invalidate()
         pttTimer = Timer.scheduledTimer(withTimeInterval: Constants.Keyboard.pttDelay, repeats: false) { [weak self] _ in
@@ -113,7 +113,7 @@ class KeyboardManager: NSObject {
         
         isPTTActive = true
         #if DEBUG
-        print("KeyboardManager: >>> PTT ACTIVATED (0.5s passed) <<<")
+        print("KeyboardManager: >>> PTT ACTIVATED (0.3s passed) <<<")
         #endif
         Task {
             await SimpleSpeechViewModel.shared.startRecording()

@@ -19,7 +19,7 @@ IDENTIFIER="${IDENTIFIER:-ilin.pt.Dictant}"
 DESTINATION="${DESTINATION:-generic/platform=macOS}"
 ARCHS="${ARCHS:-arm64 x86_64}"
 ONLY_ACTIVE_ARCH="${ONLY_ACTIVE_ARCH:-NO}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.3.0}"
 
 ARCHIVE_PATH="$ROOT/build/Dictant.xcarchive"
 APP_PATH="$ARCHIVE_PATH/Products/Applications/Dictant.app"

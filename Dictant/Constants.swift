@@ -15,7 +15,7 @@ struct Constants {
         static let bitRate: Int = 64000
         static let channelCount: Int = 1
         
-        static let minRecordingDuration: TimeInterval = 2.0
+        static let minRecordingDuration: TimeInterval = 0.5
     }
     
     struct SimpleSpeech {
@@ -39,6 +39,6 @@ struct Constants {
     
     struct Keyboard {
         static let rightCommandKeyCode: UInt16 = 54
-        static let pttDelay: TimeInterval = 0.5
+        static let pttDelay: TimeInterval = 0.3
     }
 }
