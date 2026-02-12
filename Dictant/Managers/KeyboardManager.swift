@@ -5,6 +5,7 @@
 
 import AppKit
 import Combine
+import CoreGraphics
 import UserNotifications
 
 @MainActor
@@ -15,6 +16,7 @@ class KeyboardManager: NSObject {
     private let rightCommandKeyCode = Constants.Keyboard.rightCommandKeyCode
     private var isRightCommandPressed = false
     private var pttTimer: Timer?
+    private var commandStateWatchdogTimer: Timer?
     private var isPTTActive = false
     
     private override init() {
@@ -70,6 +72,7 @@ class KeyboardManager: NSObject {
                 print("KeyboardManager: Right Command DOWN")
                 #endif
                 isRightCommandPressed = true
+                startCommandStateWatchdog()
                 startPTTTimer()
             }
         } else {
@@ -78,9 +81,46 @@ class KeyboardManager: NSObject {
                 print("KeyboardManager: Right Command UP")
                 #endif
                 isRightCommandPressed = false
+                stopCommandStateWatchdog()
                 stopPTT()
             }
         }
+    }
+
+    private func startCommandStateWatchdog() {
+        commandStateWatchdogTimer?.invalidate()
+        commandStateWatchdogTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.05,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.reconcileCommandKeyState()
+            }
+        }
+    }
+
+    private func stopCommandStateWatchdog() {
+        commandStateWatchdogTimer?.invalidate()
+        commandStateWatchdogTimer = nil
+    }
+
+    private func reconcileCommandKeyState() {
+        guard isRightCommandPressed || isPTTActive || pttTimer != nil else {
+            stopCommandStateWatchdog()
+            return
+        }
+
+        let combinedFlags = CGEventSource.flagsState(.combinedSessionState)
+        let isAnyCommandPressed = combinedFlags.contains(.maskCommand)
+        guard !isAnyCommandPressed else { return }
+
+        #if DEBUG
+        print("KeyboardManager: Watchdog detected Command release without flagsChanged. Forcing stop.")
+        #endif
+
+        isRightCommandPressed = false
+        stopCommandStateWatchdog()
+        stopPTT()
     }
     
     private func startPTTTimer() {
@@ -126,6 +166,10 @@ class KeyboardManager: NSObject {
         #endif
         pttTimer?.invalidate()
         pttTimer = nil
+
+        if !isRightCommandPressed {
+            stopCommandStateWatchdog()
+        }
         
         if isPTTActive {
             isPTTActive = false
