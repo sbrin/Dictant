@@ -5,6 +5,7 @@
 
 import AppKit
 import Combine
+import QuartzCore
 
 @MainActor
 final class MouseIndicatorManager: NSObject {
@@ -15,13 +16,8 @@ final class MouseIndicatorManager: NSObject {
 
     private var indicatorWindow: NSPanel?
     private var dotView: MouseIndicatorDotView?
-    private var flashTimer: Timer?
-    private var isFlashedOn = true
-    private var flashDotColor: NSColor?
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
-
-
 
     private override init() {
         super.init()
@@ -40,49 +36,29 @@ final class MouseIndicatorManager: NSObject {
 
     private func updateIndicatorState(isRecording: Bool, isProcessing: Bool) {
         if isRecording {
-            startFlashing(dotColor: .systemRed)
+            startIndicatorAnimation(dotColor: .systemRed)
         } else if isProcessing {
-            startFlashing(dotColor: .systemGreen)
+            startIndicatorAnimation(dotColor: .systemGreen)
         } else {
-            stopFlashing()
+            stopIndicatorAnimation()
             stopMouseTracking()
             hideIndicator()
         }
     }
 
-    private func startFlashing(dotColor: NSColor) {
+    private func startIndicatorAnimation(dotColor: NSColor) {
         ensureIndicatorWindow()
         startMouseTracking()
         updateIndicatorPosition()
 
-        let colorChanged = flashDotColor != dotColor
-        flashDotColor = dotColor
-        dotView?.dotColor = dotColor
-
-        if flashTimer == nil {
-            isFlashedOn = true
-            showIndicator()
-            let timer = Timer(timeInterval: Constants.UI.flashTimerInterval, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.isFlashedOn.toggle()
-                    self.indicatorWindow?.alphaValue = self.isFlashedOn ? 1 : 0
-                }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            flashTimer = timer
-        } else if colorChanged {
-            isFlashedOn = true
-            showIndicator()
-        }
+        dotView?.setIndicatorColor(dotColor)
+        dotView?.startAnimating()
+        showIndicator()
     }
 
-    private func stopFlashing() {
-        flashTimer?.invalidate()
-        flashTimer = nil
-        isFlashedOn = true
-        flashDotColor = nil
-        dotView?.dotColor = nil
+    private func stopIndicatorAnimation() {
+        dotView?.stopAnimating()
+        dotView?.setIndicatorColor(nil)
     }
 
     private func showIndicator() {
@@ -99,7 +75,12 @@ final class MouseIndicatorManager: NSObject {
     private func ensureIndicatorWindow() {
         guard indicatorWindow == nil else { return }
 
-        let frame = NSRect(x: 0, y: 0, width: Constants.UI.mouseIndicatorDotSize, height: Constants.UI.mouseIndicatorDotSize)
+        let frame = NSRect(
+            x: 0,
+            y: 0,
+            width: Constants.UI.mouseIndicatorCanvasSize,
+            height: Constants.UI.mouseIndicatorCanvasSize
+        )
         let dotView = MouseIndicatorDotView(frame: frame)
 
         let panel = NSPanel(
@@ -125,9 +106,10 @@ final class MouseIndicatorManager: NSObject {
     private func updateIndicatorPosition() {
         guard indicatorWindow != nil else { return }
         let mouseLocation = NSEvent.mouseLocation
+        let indicatorSize = Constants.UI.mouseIndicatorCanvasSize
         let origin = NSPoint(
-            x: mouseLocation.x + Constants.UI.mouseIndicatorDotOffset.x - Constants.UI.mouseIndicatorDotSize / 2,
-            y: mouseLocation.y + Constants.UI.mouseIndicatorDotOffset.y - Constants.UI.mouseIndicatorDotSize / 2
+            x: mouseLocation.x + Constants.UI.mouseIndicatorDotOffset.x - indicatorSize / 2,
+            y: mouseLocation.y + Constants.UI.mouseIndicatorDotOffset.y - indicatorSize / 2
         )
         indicatorWindow?.setFrameOrigin(origin)
     }
@@ -169,19 +151,129 @@ final class MouseIndicatorManager: NSObject {
 }
 
 final class MouseIndicatorDotView: NSView {
-    var dotColor: NSColor? {
-        didSet {
-            needsDisplay = true
-        }
+    private let centerDotLayer = CAShapeLayer()
+    private let pulseLayerA = CAShapeLayer()
+    private let pulseLayerB = CAShapeLayer()
+    private var indicatorColor: NSColor?
+    private var isAnimating = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupLayers()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupLayers()
     }
 
     override var isOpaque: Bool { false }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let dotColor else { return }
-        dotColor.setFill()
-        let path = NSBezierPath(ovalIn: bounds)
-        path.fill()
+    override func layout() {
+        super.layout()
+        updateLayerGeometry()
+    }
+
+    func setIndicatorColor(_ color: NSColor?) {
+        indicatorColor = color
+        updateLayerColors()
+    }
+
+    func startAnimating() {
+        guard indicatorColor != nil else { return }
+        if isAnimating {
+            return
+        }
+
+        isAnimating = true
+        addPulseAnimation(to: pulseLayerA, beginTimeOffset: 0)
+        addPulseAnimation(to: pulseLayerB, beginTimeOffset: Constants.UI.mouseIndicatorPulseStagger)
+    }
+
+    func stopAnimating() {
+        isAnimating = false
+        pulseLayerA.removeAllAnimations()
+        pulseLayerB.removeAllAnimations()
+        pulseLayerA.opacity = 0
+        pulseLayerB.opacity = 0
+    }
+
+    private func setupLayers() {
+        wantsLayer = true
+        layer?.masksToBounds = false
+
+        [pulseLayerA, pulseLayerB, centerDotLayer].forEach { shapeLayer in
+            shapeLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            shapeLayer.opacity = 0
+            layer?.addSublayer(shapeLayer)
+        }
+
+        centerDotLayer.opacity = 1
+        updateLayerGeometry()
+        updateLayerColors()
+    }
+
+    private func updateLayerGeometry() {
+        let dotSize = Constants.UI.mouseIndicatorDotSize
+        let dotRect = CGRect(
+            x: bounds.midX - (dotSize / 2),
+            y: bounds.midY - (dotSize / 2),
+            width: dotSize,
+            height: dotSize
+        )
+        let circlePath = CGPath(ellipseIn: dotRect, transform: nil)
+
+        [centerDotLayer, pulseLayerA, pulseLayerB].forEach { shapeLayer in
+            shapeLayer.path = circlePath
+            shapeLayer.frame = bounds
+        }
+    }
+
+    private func updateLayerColors() {
+        guard let indicatorColor else {
+            centerDotLayer.fillColor = nil
+            pulseLayerA.fillColor = nil
+            pulseLayerB.fillColor = nil
+            stopAnimating()
+            return
+        }
+
+        centerDotLayer.fillColor = indicatorColor.cgColor
+        let pulseColor = indicatorColor.withAlphaComponent(0.6).cgColor
+        pulseLayerA.fillColor = pulseColor
+        pulseLayerB.fillColor = pulseColor
+
+        if !isAnimating {
+            pulseLayerA.opacity = 0
+            pulseLayerB.opacity = 0
+        }
+    }
+
+    private func addPulseAnimation(to layer: CAShapeLayer, beginTimeOffset: TimeInterval) {
+        layer.removeAllAnimations()
+        layer.transform = CATransform3DIdentity
+        layer.opacity = 0
+
+        let duration = Constants.UI.mouseIndicatorPulseDuration
+
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 1.0
+        scale.toValue = Constants.UI.mouseIndicatorPulseMaxScale
+        scale.duration = duration
+
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = Constants.UI.mouseIndicatorPulseOpacity
+        opacity.toValue = 0.0
+        opacity.duration = duration
+
+        let group = CAAnimationGroup()
+        group.animations = [scale, opacity]
+        group.duration = duration
+        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        group.repeatCount = .infinity
+        group.isRemovedOnCompletion = false
+        group.beginTime = CACurrentMediaTime() + beginTimeOffset
+
+        layer.add(group, forKey: "pulse")
     }
 }

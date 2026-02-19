@@ -274,7 +274,6 @@ class AudioProcessor {
                     guard let buffer = output.copyNextSampleBuffer() else {
                         // EOF - Handle potential pending silence
                         if isSilentSequence {
-                            let silenceDuration = CMTimeGetSeconds(CMTimeSubtract(lastWrittenTime.isValid ? lastWrittenTime : silenceStartTime, silenceStartTime))
                             let pendingDuration = pendingBuffers.reduce(0.0) { $0 + CMSampleBufferGetDuration($1.0).seconds }
                              
                             if pendingDuration > Constants.Audio.minSilenceDuration {

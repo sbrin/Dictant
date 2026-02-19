@@ -26,7 +26,12 @@ struct Constants {
     
     struct UI {
         static let mouseIndicatorDotSize: CGFloat = 10.0
+        static let mouseIndicatorCanvasSize: CGFloat = 60.0
         static let mouseIndicatorDotOffset = CGPoint(x: 15, y: -15)
+        static let mouseIndicatorPulseDuration: TimeInterval = 1.2
+        static let mouseIndicatorPulseStagger: TimeInterval = 0.6
+        static let mouseIndicatorPulseMaxScale: CGFloat = 4.8
+        static let mouseIndicatorPulseOpacity: Float = 0.34
         
         static let statusItemDotSize: CGFloat = 11.0
         static let statusItemDotYOffset: CGFloat = 9.0
