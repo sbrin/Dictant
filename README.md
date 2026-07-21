@@ -6,6 +6,8 @@ Free and open-source — there are no paywalls, you only cover your own OpenAI A
 
 **[Download the latest version from the Releases page](https://github.com/sbrin/Dictant/releases)**
 
+![Dictant Processing settings with transcription and ChatGPT model selection](docs/images/processing-settings.png)
+
 ## Why Dictant
 - *Built for speed*: hold the right Command key or tap the menu bar icon to start/stop recording in a second.
 - *Clipboard automation*: copy and optionally paste the result straight into the active app.
