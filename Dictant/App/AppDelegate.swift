@@ -101,6 +101,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     AudioPermissionManager.shared.openSystemPreferences()
                 }
             }
+        } else if actionIdentifier == UNNotificationDefaultActionIdentifier {
+            Task { @MainActor in
+                SettingsManager.shared.selectedTab = "History"
+                StatusItemManager.shared.showSettingsWindow()
+            }
         }
         
         completionHandler()

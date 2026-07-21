@@ -42,3 +42,4 @@ fastlane/test_output
 # Bundle
 vendor/bundle/
 .bundle/
+.env

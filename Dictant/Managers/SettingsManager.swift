@@ -29,6 +29,16 @@ class SettingsManager: ObservableObject {
             UserDefaults.standard.set(processWithChatGPT, forKey: processWithChatGPTKey)
         }
     }
+    @Published var selectedTranscriptionModel: String {
+        didSet {
+            UserDefaults.standard.set(selectedTranscriptionModel, forKey: selectedTranscriptionModelKey)
+        }
+    }
+    @Published var selectedChatGPTModel: String {
+        didSet {
+            UserDefaults.standard.set(selectedChatGPTModel, forKey: selectedChatGPTModelKey)
+        }
+    }
     @Published var chatGPTSystemPrompt: String {
         didSet {
             UserDefaults.standard.set(chatGPTSystemPrompt, forKey: chatGPTSystemPromptKey)
@@ -60,15 +70,30 @@ class SettingsManager: ObservableObject {
     private let copyPreferenceKey = "copyTranscribedTextToClipboard"
     private let pastePreferenceKey = "pasteTranscribedTextIntoActiveInput"
     private let processWithChatGPTKey = "processWithChatGPT"
+    private let selectedTranscriptionModelKey = "selectedTranscriptionModel"
+    private let selectedChatGPTModelKey = "selectedChatGPTModel"
     private let chatGPTSystemPromptKey = "chatGPTSystemPrompt"
     private let holdRightCommandKey = "holdRightCommandForPTT"
-    
+
+    static let defaultChatGPTModel = "gpt-4o"
+    static let defaultTranscriptionModel = "whisper-1"
+    static let transcriptionModels = [
+        "gpt-4o-mini-transcribe",
+        "gpt-4o-transcribe",
+        "whisper-1"
+    ]
+
     private init() {
         let defaults = UserDefaults.standard
         selectedTab = "General"
         copyTranscribedTextToClipboard = defaults.object(forKey: copyPreferenceKey) as? Bool ?? true
         pasteTranscribedTextIntoActiveInput = defaults.object(forKey: pastePreferenceKey) as? Bool ?? true
         processWithChatGPT = defaults.object(forKey: processWithChatGPTKey) as? Bool ?? false
+        let storedTranscriptionModel = defaults.string(forKey: selectedTranscriptionModelKey)
+        selectedTranscriptionModel = storedTranscriptionModel.flatMap { model in
+            Self.transcriptionModels.contains(model) ? model : nil
+        } ?? Self.defaultTranscriptionModel
+        selectedChatGPTModel = defaults.string(forKey: selectedChatGPTModelKey) ?? Self.defaultChatGPTModel
         chatGPTSystemPrompt = defaults.string(forKey: chatGPTSystemPromptKey) ?? "Polish the transcriptions for clarity and conciseness while maintaining the original tone."
         holdRightCommandForPTT = defaults.object(forKey: holdRightCommandKey) as? Bool ?? true
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -86,7 +111,9 @@ class SettingsManager: ObservableObject {
         print("Copy to Clipboard: \(copyTranscribedTextToClipboard)")
         print("Paste to Active Input: \(pasteTranscribedTextIntoActiveInput)")
         print("Process with ChatGPT: \(processWithChatGPT)")
+        print("Transcription Model: \(selectedTranscriptionModel)")
         if processWithChatGPT {
+            print("ChatGPT Model: \(selectedChatGPTModel)")
             print("ChatGPT System Prompt: \(chatGPTSystemPrompt)")
         }
         print("---------------------------")

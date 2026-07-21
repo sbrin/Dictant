@@ -6,9 +6,9 @@
 import Foundation
 import Combine
 
-/// Service to handle standard OpenAI Whisper API transcriptions (non-realtime).
+/// Service for file-based OpenAI speech transcriptions.
 @MainActor
-class SimpleSpeechService {
+final class SimpleSpeechService {
     static let shared = SimpleSpeechService()
     
     private let settingsManager = SettingsManager.shared
@@ -44,24 +44,93 @@ class SimpleSpeechService {
         }
     }
     
-    struct TranscriptionConfiguration: Encodable {
+    struct TranscriptionConfiguration {
         let model: String
-        let language: String?
-        let prompt: String?
-        let temperature: Double?
         
-        init(model: String = "whisper-1",
-             language: String? = nil,
-             prompt: String? = nil,
-             temperature: Double? = nil) {
+        init(model: String) {
             self.model = model
-            self.language = language
-            self.prompt = prompt
-            self.temperature = temperature
+        }
+    }
+
+    private struct ModelListResponse: Decodable {
+        let data: [OpenAIModel]
+    }
+
+    private struct OpenAIModel: Decodable {
+        let id: String
+    }
+
+    func fetchAvailableChatModels() async throws -> [String] {
+        guard !settingsManager.openAIAPIKey.isEmpty else {
+            throw ServiceError.invalidAPIKey
+        }
+
+        guard let url = URL(string: "https://api.openai.com/v1/models") else {
+            throw ServiceError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(settingsManager.openAIAPIKey)", forHTTPHeaderField: "Authorization")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ServiceError.networkError(error.localizedDescription)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ServiceError.invalidResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if httpResponse.statusCode == 401 {
+                throw ServiceError.invalidAPIKey
+            }
+            if let errorJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errorDictionary = errorJSON["error"] as? [String: Any],
+               let message = errorDictionary["message"] as? String {
+                throw ServiceError.apiError(message)
+            }
+            throw ServiceError.apiError("Status code: \(httpResponse.statusCode)")
+        }
+
+        guard let response = try? JSONDecoder().decode(ModelListResponse.self, from: data) else {
+            throw ServiceError.invalidResponse
+        }
+
+        return Self.chatCompletionModelIDs(from: response.data.map(\.id))
+    }
+
+    nonisolated static func chatCompletionModelIDs(from identifiers: [String]) -> [String] {
+        let unsupportedNameFragments = [
+            "audio", "codex", "computer-use", "dall-e", "embedding", "image",
+            "instruct", "moderation", "realtime", "search", "sora", "transcribe",
+            "tts", "whisper"
+        ]
+
+        let compatibleIdentifiers = identifiers.filter { identifier in
+            let normalizedIdentifier = identifier.lowercased()
+            let hasSupportedPrefix = normalizedIdentifier.hasPrefix("gpt-")
+                || normalizedIdentifier.hasPrefix("o1")
+                || normalizedIdentifier.hasPrefix("o3")
+                || normalizedIdentifier.hasPrefix("o4")
+                || normalizedIdentifier.hasPrefix("ft:gpt-")
+                || normalizedIdentifier.hasPrefix("ft:o1")
+                || normalizedIdentifier.hasPrefix("ft:o3")
+                || normalizedIdentifier.hasPrefix("ft:o4")
+
+            return hasSupportedPrefix
+                && !unsupportedNameFragments.contains { normalizedIdentifier.contains($0) }
+        }
+
+        return Array(Set(compatibleIdentifiers)).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
         }
     }
     
-    func transcribe(audioFileURL: URL, configuration: TranscriptionConfiguration = TranscriptionConfiguration()) async throws -> String {
+    func transcribe(audioFileURL: URL, configuration: TranscriptionConfiguration? = nil) async throws -> String {
         guard !settingsManager.openAIAPIKey.isEmpty else {
             throw ServiceError.invalidAPIKey
         }
@@ -92,11 +161,23 @@ class SimpleSpeechService {
             throw ServiceError.networkError(error.localizedDescription)
         }
         
-        let body = createMultipartBody(boundary: boundary, 
+        let effectiveConfiguration: TranscriptionConfiguration
+        if let configuration {
+            effectiveConfiguration = configuration
+        } else {
+            effectiveConfiguration = TranscriptionConfiguration(
+                model: settingsManager.selectedTranscriptionModel
+            )
+        }
+        let body = createMultipartBody(boundary: boundary,
                                      audioData: audioData, 
                                      filename: audioFileURL.lastPathComponent, 
-                                     configuration: configuration)
+                                     configuration: effectiveConfiguration)
         request.httpBody = body
+
+        #if DEBUG
+        print("SimpleSpeechService: Transcription model: \(effectiveConfiguration.model)")
+        #endif
         
         let data: Data
         let response: URLResponse
@@ -170,9 +251,8 @@ class SimpleSpeechService {
         ]
         
         let body: [String: Any] = [
-            "model": "gpt-4o",
-            "messages": messages,
-            "temperature": 0.7
+            "model": settingsManager.selectedChatGPTModel,
+            "messages": messages
         ]
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -257,40 +337,16 @@ class SimpleSpeechService {
         body.append(audioData)
         append("\(lineBreak)")
         
-        let mirror = Mirror(reflecting: configuration)
-        for child in mirror.children {
-            guard let label = child.label else { continue }
-            
-            let value: String?
-            if let optionalValue = child.value as? OptionalProtocol {
-                if optionalValue.isNil { continue }
-                value = "\(optionalValue.unwrap())"
-            } else {
-                value = "\(child.value)"
-            }
-            
-            if let existingValue = value {
-                var key = label
-                if key == "responseFormat" { key = "response_format" }
-                
-                append("--\(boundary)\(lineBreak)")
-                append("Content-Disposition: form-data; name=\"\(key)\"\(lineBreak)\(lineBreak)")
-                append("\(existingValue)\(lineBreak)")
-            }
+        func appendFormField(name: String, value: String) {
+            append("--\(boundary)\(lineBreak)")
+            append("Content-Disposition: form-data; name=\"\(name)\"\(lineBreak)\(lineBreak)")
+            append("\(value)\(lineBreak)")
         }
+
+        appendFormField(name: "model", value: configuration.model)
         
         append("--\(boundary)--\(lineBreak)")
         
         return body
     }
-}
-
-fileprivate protocol OptionalProtocol {
-    var isNil: Bool { get }
-    func unwrap() -> Any
-}
-
-extension Optional: OptionalProtocol {
-    var isNil: Bool { return self == nil }
-    func unwrap() -> Any { return self! }
 }

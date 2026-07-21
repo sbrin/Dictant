@@ -9,6 +9,9 @@ import AppKit
 struct ProcessingView: View {
     @StateObject private var settingsManager = SettingsManager.shared
     @State private var tempAPIKey = ""
+    @State private var availableModels: [String] = []
+    @State private var isLoadingModels = false
+    @State private var modelLoadingError: String?
     private let apiKeyHelpURL = URL(string: "https://platform.openai.com/account/api-keys")!
     
     private var hasUnsavedChanges: Bool { tempAPIKey != settingsManager.openAIAPIKey }
@@ -37,7 +40,22 @@ struct ProcessingView: View {
                             .foregroundColor(.red)
                     }
                 }
-                
+
+                HStack {
+                    Text("Transcription Model")
+                        .font(.headline)
+
+                    Spacer()
+
+                    Picker("Transcription Model", selection: $settingsManager.selectedTranscriptionModel) {
+                        ForEach(SettingsManager.transcriptionModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 250)
+                }
+
                 Text("Your API key is stored securely in the macOS Keychain.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -81,6 +99,43 @@ struct ProcessingView: View {
                 
                 if settingsManager.processWithChatGPT && settingsManager.isAPIKeyValid {
                     VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Model")
+                                .font(.headline)
+
+                            Spacer()
+
+                            if isLoadingModels {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+
+                            Picker("Model", selection: $settingsManager.selectedChatGPTModel) {
+                                ForEach(displayedModels, id: \.self) { model in
+                                    Text(model).tag(model)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 250)
+
+                            Button {
+                                Task {
+                                    await loadAvailableModels()
+                                }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(isLoadingModels)
+                            .help("Refresh available models")
+                        }
+
+                        if let modelLoadingError {
+                            Text(modelLoadingError)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
                         Text("System Prompt")
                             .font(.headline)
                         
@@ -94,7 +149,7 @@ struct ProcessingView: View {
                                     .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                             )
                         
-                        Text("This will be used to process the transcribed text using ChatGPT (gpt-5)")
+                        Text("This will process the transcribed text using \(settingsManager.selectedChatGPTModel).")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -104,5 +159,52 @@ struct ProcessingView: View {
             Spacer()
         }
         .padding(20)
+        .task(id: settingsManager.openAIAPIKey) {
+            await loadAvailableModels()
+        }
+    }
+
+    private var displayedModels: [String] {
+        if availableModels.isEmpty {
+            return [settingsManager.selectedChatGPTModel]
+        }
+        return availableModels
+    }
+
+    private func loadAvailableModels() async {
+        guard settingsManager.isAPIKeyValid else {
+            availableModels = []
+            modelLoadingError = nil
+            return
+        }
+
+        isLoadingModels = true
+        modelLoadingError = nil
+        defer { isLoadingModels = false }
+
+        do {
+            let models = try await SimpleSpeechService.shared.fetchAvailableChatModels()
+            guard !models.isEmpty else {
+                availableModels = []
+                modelLoadingError = "No compatible text models are available for this API key."
+                return
+            }
+
+            if !models.contains(settingsManager.selectedChatGPTModel) {
+                settingsManager.selectedChatGPTModel = models.contains(SettingsManager.defaultChatGPTModel)
+                    ? SettingsManager.defaultChatGPTModel
+                    : models[0]
+            }
+            availableModels = models
+        } catch SimpleSpeechService.ServiceError.invalidAPIKey {
+            availableModels = []
+            modelLoadingError = "The API key could not load available models."
+        } catch SimpleSpeechService.ServiceError.apiError(let message) {
+            availableModels = []
+            modelLoadingError = "Could not load models: \(message)"
+        } catch {
+            availableModels = []
+            modelLoadingError = "Could not load available models."
+        }
     }
 }

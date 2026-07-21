@@ -70,7 +70,7 @@ Use the bundled helper scripts to create a standard macOS installer package.
 Build and package in one shot: `./packaging/build_and_pkg.sh`
 
 ### Versioning Notes
-`packaging/build_and_pkg.sh` uses Xcode build settings (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`) because the Info.plist is generated at build time. If you do not pass `CURRENT_PROJECT_VERSION`, the script increments the current build number automatically.
+`packaging/build_and_pkg.sh` uses the target's `MARKETING_VERSION` and automatically increments `CURRENT_PROJECT_VERSION` when tracked or untracked project inputs change. The generated state is stored in `packaging/version-state.env`; unchanged inputs reuse the same build number. Set `VERSION` or `CURRENT_PROJECT_VERSION` to override either value for a build.
 
 
 ## Usage Notes
