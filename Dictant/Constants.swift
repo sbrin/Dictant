@@ -44,6 +44,6 @@ struct Constants {
     
     struct Keyboard {
         static let rightCommandKeyCode: UInt16 = 54
-        static let pttDelay: TimeInterval = 0.3
+        static let pttDelay: TimeInterval = 0.1
     }
 }
